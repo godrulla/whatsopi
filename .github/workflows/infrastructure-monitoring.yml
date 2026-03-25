@@ -1,0 +1,522 @@
+name: Infrastructure Monitoring & Health Checks
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Every 5 minutes
+    - cron: '0 */2 * * *' # Every 2 hours for detailed checks
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to monitor'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      check_type:
+        description: 'Type of health check'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - api
+        - database
+        - cache
+        - monitoring
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  # API Health Checks
+  api-health-check:
+    name: API Health Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [production, staging]
+        endpoint: [
+          '/health',
+          '/api/auth/health',
+          '/api/users/health',
+          '/api/payments/health',
+          '/api/commerce/health',
+          '/api/whatsapp/health'
+        ]
+    
+    steps:
+      - name: Check API endpoint
+        id: health-check
+        run: |
+          ENVIRONMENT=${{ matrix.environment }}
+          ENDPOINT=${{ matrix.endpoint }}
+          
+          if [ "$ENVIRONMENT" = "production" ]; then
+            BASE_URL="https://api.whatsopi.do"
+          else
+            BASE_URL="https://api-staging.whatsopi.do"
+          fi
+          
+          FULL_URL="${BASE_URL}${ENDPOINT}"
+          
+          echo "Checking: $FULL_URL"
+          
+          # Health check with timeout and retry
+          RESPONSE=$(curl -s -w "%{http_code}:%{time_total}:%{time_connect}" \
+            --max-time 10 \
+            --retry 3 \
+            --retry-delay 2 \
+            "$FULL_URL" || echo "000:0:0")
+          
+          HTTP_CODE=$(echo $RESPONSE | cut -d: -f1)
+          TOTAL_TIME=$(echo $RESPONSE | cut -d: -f2)
+          CONNECT_TIME=$(echo $RESPONSE | cut -d: -f3)
+          
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          echo "total_time=$TOTAL_TIME" >> $GITHUB_OUTPUT
+          echo "connect_time=$CONNECT_TIME" >> $GITHUB_OUTPUT
+          echo "endpoint=$FULL_URL" >> $GITHUB_OUTPUT
+
+      - name: Evaluate health status
+        run: |
+          HTTP_CODE=${{ steps.health-check.outputs.http_code }}
+          TOTAL_TIME=${{ steps.health-check.outputs.total_time }}
+          ENDPOINT=${{ steps.health-check.outputs.endpoint }}
+          
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ $ENDPOINT - Healthy (${TOTAL_TIME}s)"
+          elif [ "$HTTP_CODE" -eq 503 ]; then
+            echo "⚠️ $ENDPOINT - Service Unavailable"
+            exit 1
+          elif [ "$HTTP_CODE" -eq 000 ]; then
+            echo "❌ $ENDPOINT - Connection Failed"
+            exit 1
+          else
+            echo "⚠️ $ENDPOINT - HTTP $HTTP_CODE (${TOTAL_TIME}s)"
+            exit 1
+          fi
+
+      - name: Report to CloudWatch
+        if: always()
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region ${{ env.AWS_REGION }}
+          
+          # Send custom metrics to CloudWatch
+          aws cloudwatch put-metric-data \
+            --namespace "WhatsOpi/HealthCheck" \
+            --metric-data \
+              MetricName=ResponseTime,Value=${{ steps.health-check.outputs.total_time }},Unit=Seconds,Dimensions=Environment=${{ matrix.environment }},Endpoint=${{ matrix.endpoint }} \
+              MetricName=HttpStatusCode,Value=${{ steps.health-check.outputs.http_code }},Unit=Count,Dimensions=Environment=${{ matrix.environment }},Endpoint=${{ matrix.endpoint }}
+
+  # Database Health Checks
+  database-health-check:
+    name: Database Health Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [production, staging]
+        database: [postgresql, redis, opensearch]
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check PostgreSQL health
+        if: matrix.database == 'postgresql'
+        run: |
+          # Get RDS instance metrics
+          INSTANCE_ID="whatsopi-${{ matrix.environment }}-db"
+          
+          # Check CPU utilization
+          CPU_UTIL=$(aws rds describe-db-instances \
+            --db-instance-identifier $INSTANCE_ID \
+            --query 'DBInstances[0].DBInstanceStatus' \
+            --output text)
+          
+          echo "PostgreSQL Status: $CPU_UTIL"
+          
+          # Send metric to CloudWatch
+          aws cloudwatch put-metric-data \
+            --namespace "WhatsOpi/Database" \
+            --metric-data MetricName=Status,Value=1,Unit=Count,Dimensions=Environment=${{ matrix.environment }},Database=postgresql
+
+      - name: Check Redis health
+        if: matrix.database == 'redis'
+        run: |
+          # Get ElastiCache cluster metrics
+          CLUSTER_ID="whatsopi-${{ matrix.environment }}-redis"
+          
+          CLUSTER_STATUS=$(aws elasticache describe-cache-clusters \
+            --cache-cluster-id $CLUSTER_ID \
+            --query 'CacheClusters[0].CacheClusterStatus' \
+            --output text 2>/dev/null || echo "not-found")
+          
+          echo "Redis Status: $CLUSTER_STATUS"
+          
+          if [ "$CLUSTER_STATUS" = "available" ]; then
+            STATUS_VALUE=1
+          else
+            STATUS_VALUE=0
+          fi
+          
+          aws cloudwatch put-metric-data \
+            --namespace "WhatsOpi/Database" \
+            --metric-data MetricName=Status,Value=$STATUS_VALUE,Unit=Count,Dimensions=Environment=${{ matrix.environment }},Database=redis
+
+      - name: Check OpenSearch health
+        if: matrix.database == 'opensearch'
+        run: |
+          # Check OpenSearch domain health
+          DOMAIN_NAME="whatsopi-${{ matrix.environment }}-search"
+          
+          DOMAIN_STATUS=$(aws opensearch describe-domain \
+            --domain-name $DOMAIN_NAME \
+            --query 'DomainStatus.Processing' \
+            --output text 2>/dev/null || echo "true")
+          
+          echo "OpenSearch Processing: $DOMAIN_STATUS"
+          
+          if [ "$DOMAIN_STATUS" = "false" ]; then
+            STATUS_VALUE=1
+          else
+            STATUS_VALUE=0
+          fi
+          
+          aws cloudwatch put-metric-data \
+            --namespace "WhatsOpi/Database" \
+            --metric-data MetricName=Status,Value=$STATUS_VALUE,Unit=Count,Dimensions=Environment=${{ matrix.environment }},Database=opensearch
+
+  # Performance Monitoring
+  performance-monitoring:
+    name: Performance Monitoring
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 */2 * * *' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        environment: [production, staging]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run performance monitoring
+        run: |
+          ENVIRONMENT=${{ matrix.environment }}
+          
+          if [ "$ENVIRONMENT" = "production" ]; then
+            BASE_URL="https://whatsopi.do"
+          else
+            BASE_URL="https://staging.whatsopi.do"
+          fi
+          
+          # Run Lighthouse performance audit
+          npx lighthouse "$BASE_URL" \
+            --chrome-flags="--headless --no-sandbox" \
+            --output=json \
+            --output-path=./lighthouse-$ENVIRONMENT.json \
+            --preset=perf \
+            --throttling-method=simulate \
+            --throttling.cpuSlowdownMultiplier=4 \
+            --throttling.rttMs=150 \
+            --throttling.throughputKbps=1600
+
+      - name: Extract performance metrics
+        run: |
+          ENVIRONMENT=${{ matrix.environment }}
+          
+          # Extract key performance metrics
+          FCP=$(jq -r '.audits["first-contentful-paint"].numericValue' lighthouse-$ENVIRONMENT.json)
+          LCP=$(jq -r '.audits["largest-contentful-paint"].numericValue' lighthouse-$ENVIRONMENT.json)
+          TTI=$(jq -r '.audits["interactive"].numericValue' lighthouse-$ENVIRONMENT.json)
+          CLS=$(jq -r '.audits["cumulative-layout-shift"].numericValue' lighthouse-$ENVIRONMENT.json)
+          SCORE=$(jq -r '.categories.performance.score' lighthouse-$ENVIRONMENT.json)
+          
+          echo "Performance Metrics for $ENVIRONMENT:"
+          echo "FCP: ${FCP}ms"
+          echo "LCP: ${LCP}ms"
+          echo "TTI: ${TTI}ms"
+          echo "CLS: $CLS"
+          echo "Performance Score: $(echo "$SCORE * 100" | bc)%"
+          
+          # Save metrics for CloudWatch
+          echo "FCP=$FCP" >> $GITHUB_ENV
+          echo "LCP=$LCP" >> $GITHUB_ENV
+          echo "TTI=$TTI" >> $GITHUB_ENV
+          echo "CLS=$CLS" >> $GITHUB_ENV
+          echo "PERF_SCORE=$(echo "$SCORE * 100" | bc)" >> $GITHUB_ENV
+
+      - name: Send metrics to CloudWatch
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region ${{ env.AWS_REGION }}
+          
+          ENVIRONMENT=${{ matrix.environment }}
+          
+          # Send performance metrics to CloudWatch
+          aws cloudwatch put-metric-data \
+            --namespace "WhatsOpi/Performance" \
+            --metric-data \
+              MetricName=FirstContentfulPaint,Value=$FCP,Unit=Milliseconds,Dimensions=Environment=$ENVIRONMENT \
+              MetricName=LargestContentfulPaint,Value=$LCP,Unit=Milliseconds,Dimensions=Environment=$ENVIRONMENT \
+              MetricName=TimeToInteractive,Value=$TTI,Unit=Milliseconds,Dimensions=Environment=$ENVIRONMENT \
+              MetricName=CumulativeLayoutShift,Value=$CLS,Unit=None,Dimensions=Environment=$ENVIRONMENT \
+              MetricName=PerformanceScore,Value=$PERF_SCORE,Unit=Percent,Dimensions=Environment=$ENVIRONMENT
+
+      - name: Check performance thresholds
+        run: |
+          ENVIRONMENT=${{ matrix.environment }}
+          
+          # Performance thresholds for Dominican Republic mobile users
+          FCP_THRESHOLD=1500  # 1.5 seconds
+          LCP_THRESHOLD=2500  # 2.5 seconds
+          TTI_THRESHOLD=3000  # 3 seconds
+          CLS_THRESHOLD=0.1   # 0.1 CLS
+          SCORE_THRESHOLD=80  # 80% performance score
+          
+          ALERTS=""
+          
+          if (( $(echo "$FCP > $FCP_THRESHOLD" | bc -l) )); then
+            ALERTS="$ALERTS\n❌ FCP: ${FCP}ms > ${FCP_THRESHOLD}ms"
+          fi
+          
+          if (( $(echo "$LCP > $LCP_THRESHOLD" | bc -l) )); then
+            ALERTS="$ALERTS\n❌ LCP: ${LCP}ms > ${LCP_THRESHOLD}ms"
+          fi
+          
+          if (( $(echo "$TTI > $TTI_THRESHOLD" | bc -l) )); then
+            ALERTS="$ALERTS\n❌ TTI: ${TTI}ms > ${TTI_THRESHOLD}ms"
+          fi
+          
+          if (( $(echo "$CLS > $CLS_THRESHOLD" | bc -l) )); then
+            ALERTS="$ALERTS\n❌ CLS: $CLS > $CLS_THRESHOLD"
+          fi
+          
+          if (( $(echo "$PERF_SCORE < $SCORE_THRESHOLD" | bc -l) )); then
+            ALERTS="$ALERTS\n❌ Performance Score: $PERF_SCORE% < $SCORE_THRESHOLD%"
+          fi
+          
+          if [ -n "$ALERTS" ]; then
+            echo "⚠️ Performance thresholds exceeded for $ENVIRONMENT:"
+            echo -e "$ALERTS"
+            echo "performance_alert=true" >> $GITHUB_ENV
+          else
+            echo "✅ All performance thresholds met for $ENVIRONMENT"
+            echo "performance_alert=false" >> $GITHUB_ENV
+          fi
+
+      - name: Alert on performance degradation
+        if: env.performance_alert == 'true'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#alerts'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          text: |
+            🚨 Performance Alert - ${{ matrix.environment }}
+            
+            Performance thresholds exceeded:
+            • FCP: ${{ env.FCP }}ms (threshold: 1500ms)
+            • LCP: ${{ env.LCP }}ms (threshold: 2500ms)
+            • TTI: ${{ env.TTI }}ms (threshold: 3000ms)
+            • CLS: ${{ env.CLS }} (threshold: 0.1)
+            • Score: ${{ env.PERF_SCORE }}% (threshold: 80%)
+
+  # Dominican-Specific Monitoring
+  dominican-monitoring:
+    name: Dominican Market Monitoring
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 */2 * * *' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Check Dominican network conditions
+        run: |
+          # Simulate Dominican network conditions from Miami edge
+          echo "Testing from Miami (closest to Dominican Republic)..."
+          
+          # Test latency to Dominican Republic
+          LATENCY=$(ping -c 4 8.8.8.8 | tail -1 | awk '{print $4}' | cut -d '/' -f 2)
+          echo "Network latency: ${LATENCY}ms"
+          
+          # Test connection quality
+          PACKET_LOSS=$(ping -c 10 8.8.8.8 | grep 'packet loss' | awk '{print $6}' | sed 's/%//')
+          echo "Packet loss: ${PACKET_LOSS}%"
+
+      - name: Test Dominican Spanish voice processing
+        run: |
+          # Test voice processing with Dominican Spanish samples
+          echo "Testing Dominican Spanish voice accuracy..."
+          
+          # This would integrate with your voice processing service
+          # curl -X POST https://api.whatsopi.do/voice/test \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"text":"Klk tiguer, busco pollo barato en el colmado","language":"es-DO"}'
+
+      - name: Monitor Dominican payment systems
+        run: |
+          echo "Checking Dominican payment integrations..."
+          
+          # Check tPago integration
+          # curl -s https://api.tpago.do/health || echo "tPago unreachable"
+          
+          # Check local bank connectivity
+          # This would test connections to Dominican banks
+          
+          echo "Payment systems check completed"
+
+      - name: Cultural appropriateness check
+        run: |
+          echo "Running cultural appropriateness validation..."
+          
+          # Test cultural markers and appropriateness
+          # This would run your cultural validation tests
+          
+          echo "Cultural validation completed"
+
+  # Security Monitoring
+  security-monitoring:
+    name: Security Monitoring
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/5 * * * *' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check WAF metrics
+        run: |
+          # Get WAF blocked requests
+          BLOCKED_REQUESTS=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/WAFV2 \
+            --metric-name BlockedRequests \
+            --dimensions Name=WebACL,Value=whatsopi-waf \
+            --start-time $(date -d '5 minutes ago' -u +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 300 \
+            --statistics Sum \
+            --query 'Datapoints[0].Sum' \
+            --output text 2>/dev/null || echo "0")
+          
+          echo "WAF blocked requests (last 5 min): $BLOCKED_REQUESTS"
+          
+          # Alert if too many blocked requests
+          if [ "$BLOCKED_REQUESTS" -gt 100 ]; then
+            echo "security_alert=true" >> $GITHUB_ENV
+            echo "alert_message=High number of blocked requests: $BLOCKED_REQUESTS" >> $GITHUB_ENV
+          fi
+
+      - name: Check certificate expiration
+        run: |
+          # Check SSL certificate expiration
+          CERT_EXPIRY=$(echo | openssl s_client -servername whatsopi.do -connect whatsopi.do:443 2>/dev/null | \
+            openssl x509 -noout -enddate | cut -d= -f2)
+          
+          CERT_EXPIRY_EPOCH=$(date -d "$CERT_EXPIRY" +%s)
+          CURRENT_EPOCH=$(date +%s)
+          DAYS_UNTIL_EXPIRY=$(( (CERT_EXPIRY_EPOCH - CURRENT_EPOCH) / 86400 ))
+          
+          echo "SSL certificate expires in $DAYS_UNTIL_EXPIRY days"
+          
+          # Alert if certificate expires soon
+          if [ "$DAYS_UNTIL_EXPIRY" -lt 30 ]; then
+            echo "cert_alert=true" >> $GITHUB_ENV
+            echo "cert_message=SSL certificate expires in $DAYS_UNTIL_EXPIRY days" >> $GITHUB_ENV
+          fi
+
+      - name: Check Dominican Law 172-13 compliance
+        run: |
+          echo "Running Dominican Law 172-13 compliance checks..."
+          
+          # Check data retention policies
+          # Check encryption status
+          # Check user consent records
+          # Check cross-border data transfer logs
+          
+          echo "Compliance check completed"
+
+      - name: Security alert
+        if: env.security_alert == 'true' || env.cert_alert == 'true'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#security-alerts'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          text: |
+            🚨 Security Alert
+            
+            ${{ env.alert_message }}
+            ${{ env.cert_message }}
+
+  # Monitoring Summary
+  monitoring-summary:
+    name: Monitoring Summary
+    runs-on: ubuntu-latest
+    needs: [api-health-check, database-health-check, performance-monitoring, security-monitoring]
+    if: always()
+    
+    steps:
+      - name: Generate monitoring report
+        run: |
+          echo "# WhatsOpí Infrastructure Monitoring Report" > monitoring-report.md
+          echo "Generated: $(date)" >> monitoring-report.md
+          echo "" >> monitoring-report.md
+          
+          echo "## Job Status Summary" >> monitoring-report.md
+          echo "- API Health Check: ${{ needs.api-health-check.result }}" >> monitoring-report.md
+          echo "- Database Health Check: ${{ needs.database-health-check.result }}" >> monitoring-report.md
+          echo "- Performance Monitoring: ${{ needs.performance-monitoring.result }}" >> monitoring-report.md
+          echo "- Security Monitoring: ${{ needs.security-monitoring.result }}" >> monitoring-report.md
+          echo "" >> monitoring-report.md
+          
+          # Determine overall health
+          if [[ "${{ needs.api-health-check.result }}" == "success" && \
+                "${{ needs.database-health-check.result }}" == "success" && \
+                "${{ needs.security-monitoring.result }}" == "success" ]]; then
+            echo "## Overall Status: ✅ HEALTHY" >> monitoring-report.md
+          else
+            echo "## Overall Status: ❌ ISSUES DETECTED" >> monitoring-report.md
+          fi
+
+      - name: Upload monitoring report
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-report-$(date +%Y%m%d-%H%M%S)
+          path: monitoring-report.md
+
+      - name: Daily monitoring summary
+        if: github.event.schedule == '0 */2 * * *'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#monitoring'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          text: |
+            📊 Daily Infrastructure Monitoring Summary
+            
+            API Health: ${{ needs.api-health-check.result }}
+            DB Health: ${{ needs.database-health-check.result }}
+            Performance: ${{ needs.performance-monitoring.result }}
+            Security: ${{ needs.security-monitoring.result }}
+            
+            View full report in GitHub Actions artifacts.

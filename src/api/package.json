@@ -1,0 +1,28 @@
+{
+  "name": "whatsopi-webhook-server",
+  "version": "1.0.0",
+  "description": "WhatsApp webhook server for WhatsOpí - Dominican colmado platform",
+  "main": "webhook-server.js",
+  "scripts": {
+    "start": "node webhook-server.js",
+    "dev": "nodemon webhook-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "whatsapp",
+    "dominican-republic",
+    "webhook",
+    "colmado",
+    "spanish"
+  ],
+  "author": "Armando Diaz Silverio",
+  "license": "MIT"
+}

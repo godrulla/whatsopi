@@ -1,0 +1,346 @@
+{
+  "app": {
+    "name": "WhatsOpí",
+    "tagline": "Tu Colmado Digital Dominicano",
+    "description": "Plataforma digital impulsada por IA para la economía informal dominicana"
+  },
+  "navigation": {
+    "home": "Inicio",
+    "colmados": "Colmados",
+    "products": "Productos",
+    "orders": "Pedidos",
+    "profile": "Perfil",
+    "help": "Ayuda",
+    "settings": "Configuración"
+  },
+  "auth": {
+    "login": "Iniciar Sesión",
+    "register": "Registrarse",
+    "logout": "Cerrar Sesión",
+    "phone": "Teléfono",
+    "password": "Contraseña",
+    "name": "Nombre",
+    "email": "Correo (opcional)",
+    "loginButton": "Entrar",
+    "registerButton": "Crear Cuenta",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "phonePlaceholder": "809-123-4567",
+    "namePlaceholder": "Tu nombre completo",
+    "passwordPlaceholder": "Tu contraseña segura",
+    "loginSuccess": "¡Bienvenido de vuelta!",
+    "registerSuccess": "¡Cuenta creada exitosamente!",
+    "loginError": "Error al iniciar sesión",
+    "registerError": "Error al crear cuenta",
+    "phoneRequired": "El teléfono es requerido",
+    "passwordRequired": "La contraseña es requerida",
+    "nameRequired": "El nombre es requerido"
+  },
+  "colmados": {
+    "title": "Colmados Cercanos",
+    "findNearby": "Buscar Cercanos",
+    "viewAll": "Ver Todos",
+    "distance": "{{distance}} km",
+    "rating": "{{rating}} estrellas",
+    "open": "Abierto",
+    "closed": "Cerrado",
+    "openUntil": "Abierto hasta {{time}}",
+    "opensAt": "Abre a las {{time}}",
+    "services": {
+      "delivery": "Delivery",
+      "pickup": "Recoger",
+      "cashOut": "Retiro Efectivo",
+      "payments": "Pagos"
+    },
+    "contact": "Contactar",
+    "whatsapp": "WhatsApp",
+    "call": "Llamar",
+    "directions": "Direcciones",
+    "menu": "Ver Menú",
+    "noColmados": "No hay colmados cerca",
+    "searchLocation": "Buscar en mi ubicación",
+    "allowLocation": "Permitir ubicación para mejores resultados"
+  },
+  "products": {
+    "title": "Productos",
+    "search": "Buscar productos...",
+    "searchPlaceholder": "¿Qué necesitas? (ej: arroz, pollo, leche)",
+    "categories": {
+      "all": "Todos",
+      "food": "Alimentos",
+      "drinks": "Bebidas",
+      "household": "Hogar",
+      "personal": "Personal",
+      "electronics": "Electrónicos",
+      "other": "Otros"
+    },
+    "price": "Precio",
+    "currency": "RD$",
+    "inStock": "Disponible",
+    "outOfStock": "Agotado",
+    "addToCart": "Agregar al Carrito",
+    "quantity": "Cantidad",
+    "description": "Descripción",
+    "fromColmado": "De {{colmadoName}}",
+    "comparePrice": "Comparar Precios",
+    "noResults": "No se encontraron productos",
+    "tryDifferent": "Intenta con otras palabras",
+    "voiceSearch": "Buscar por voz",
+    "speakNow": "Habla ahora...",
+    "listening": "Escuchando..."
+  },
+  "cart": {
+    "title": "Mi Carrito",
+    "empty": "Tu carrito está vacío",
+    "continueShoppingButton": "Seguir Comprando",
+    "item": "artículo",
+    "items": "artículos",
+    "subtotal": "Subtotal",
+    "delivery": "Delivery",
+    "tax": "Impuesto",
+    "total": "Total",
+    "checkout": "Proceder al Pago",
+    "remove": "Eliminar",
+    "updateQuantity": "Actualizar cantidad",
+    "deliveryOptions": {
+      "pickup": "Recoger en tienda",
+      "delivery": "Delivery a domicilio"
+    },
+    "deliveryFee": "Tarifa de delivery: RD${{fee}}",
+    "freeDelivery": "Delivery gratis",
+    "minimumOrder": "Pedido mínimo: RD${{minimum}}"
+  },
+  "orders": {
+    "title": "Mis Pedidos",
+    "current": "Pedidos Actuales",
+    "history": "Historial",
+    "orderNumber": "Pedido #{{number}}",
+    "status": {
+      "pending": "Pendiente",
+      "confirmed": "Confirmado",
+      "preparing": "Preparando",
+      "ready": "Listo",
+      "delivered": "Entregado",
+      "cancelled": "Cancelado"
+    },
+    "placedOn": "Realizado el {{date}}",
+    "totalAmount": "Total: RD${{amount}}",
+    "viewDetails": "Ver Detalles",
+    "trackOrder": "Rastrear Pedido",
+    "cancelOrder": "Cancelar Pedido",
+    "reorder": "Volver a Pedir",
+    "noOrders": "No tienes pedidos",
+    "makeFirstOrder": "¡Haz tu primer pedido!",
+    "estimatedTime": "Tiempo estimado: {{time}} min",
+    "deliveryAddress": "Dirección de entrega",
+    "paymentMethod": "Método de pago",
+    "orderItems": "Artículos del pedido",
+    "contact": "Contactar al colmado"
+  },
+  "payment": {
+    "title": "Método de Pago",
+    "methods": {
+      "cash": "Efectivo",
+      "card": "Tarjeta",
+      "paypal": "PayPal",
+      "tpago": "tPago",
+      "digitalWallet": "Billetera Digital"
+    },
+    "cashOnDelivery": "Pago contra entrega",
+    "cashOnPickup": "Pago al recoger",
+    "cardDetails": "Detalles de la Tarjeta",
+    "cardNumber": "Número de Tarjeta",
+    "expiryDate": "Fecha de Expiración",
+    "cvv": "CVV",
+    "nameOnCard": "Nombre en la Tarjeta",
+    "billingAddress": "Dirección de Facturación",
+    "processPayment": "Procesar Pago",
+    "paymentSuccessful": "¡Pago exitoso!",
+    "paymentFailed": "Error en el pago",
+    "securePayment": "Pago 100% seguro",
+    "saveCard": "Guardar tarjeta para futuros pagos"
+  },
+  "voice": {
+    "title": "Comando de Voz",
+    "startListening": "Presiona para hablar",
+    "listening": "Escuchando...",
+    "processing": "Procesando...",
+    "tryAgain": "Intentar de nuevo",
+    "notSupported": "Tu navegador no soporta reconocimiento de voz",
+    "microphoneBlocked": "Micrófono bloqueado. Habilita el acceso al micrófono.",
+    "examples": {
+      "title": "Ejemplos de comandos:",
+      "search": "\"Buscar arroz\"",
+      "price": "\"¿Cuánto cuesta el pollo?\"",
+      "colmado": "\"Colmado más cercano\"",
+      "order": "\"Hacer un pedido\""
+    },
+    "tips": {
+      "title": "Consejos:",
+      "clear": "Habla claro y despacio",
+      "quiet": "Usa en un lugar silencioso",
+      "close": "Acércate al micrófono"
+    }
+  },
+  "profile": {
+    "title": "Mi Perfil",
+    "personalInfo": "Información Personal",
+    "paymentMethods": "Métodos de Pago",
+    "addresses": "Direcciones",
+    "preferences": "Preferencias",
+    "digitalReputation": "Reputación Digital",
+    "name": "Nombre",
+    "phone": "Teléfono",
+    "email": "Correo Electrónico",
+    "language": "Idioma",
+    "notifications": "Notificaciones",
+    "privacy": "Privacidad",
+    "editProfile": "Editar Perfil",
+    "saveChanges": "Guardar Cambios",
+    "changePassword": "Cambiar Contraseña",
+    "deleteAccount": "Eliminar Cuenta",
+    "reputationScore": "Puntuación: {{score}}/100",
+    "verifiedUser": "Usuario Verificado",
+    "totalTransactions": "{{count}} transacciones completadas",
+    "memberSince": "Miembro desde {{date}}"
+  },
+  "reputation": {
+    "title": "Reputación Digital",
+    "score": "Puntuación",
+    "factors": {
+      "transactionReliability": "Confiabilidad en Transacciones",
+      "customerSatisfaction": "Satisfacción del Cliente",
+      "businessGrowth": "Crecimiento del Negocio",
+      "communityEngagement": "Participación Comunitaria",
+      "paymentHistory": "Historial de Pagos"
+    },
+    "improveTips": {
+      "title": "Cómo mejorar tu reputación:",
+      "completeOrders": "Completa tus pedidos a tiempo",
+      "payOnTime": "Paga puntualmente",
+      "getReviews": "Obtén reseñas positivas",
+      "stayActive": "Mantente activo en la plataforma"
+    },
+    "benefits": {
+      "title": "Beneficios de alta reputación:",
+      "betterCredit": "Mejores ofertas de crédito",
+      "prioritySupport": "Soporte prioritario",
+      "exclusiveOffers": "Ofertas exclusivas",
+      "trustBadge": "Insignia de confianza"
+    }
+  },
+  "credit": {
+    "title": "Evaluación de Crédito",
+    "score": "Puntuación de Crédito",
+    "recommendation": "Recomendación",
+    "maxLoanAmount": "Monto Máximo de Préstamo",
+    "suggestedRate": "Tasa Sugerida",
+    "factors": "Factores Evaluados",
+    "improve": "Cómo Mejorar",
+    "apply": "Solicitar Préstamo",
+    "recommendations": {
+      "approve": "Aprobado",
+      "review": "En Revisión",
+      "decline": "Declinado"
+    },
+    "tips": {
+      "title": "Consejos para mejorar tu crédito:",
+      "consistent": "Mantén pagos consistentes",
+      "diversify": "Diversifica tus transacciones",
+      "engage": "Participa en la comunidad",
+      "verify": "Verifica tu información"
+    }
+  },
+  "offline": {
+    "title": "Modo Offline",
+    "message": "Sin conexión a internet",
+    "description": "Puedes seguir usando la app. Los cambios se sincronizarán cuando tengas conexión.",
+    "lastSync": "Última sincronización: {{time}}",
+    "pendingActions": "{{count}} acciones pendientes",
+    "syncNow": "Sincronizar Ahora",
+    "syncInProgress": "Sincronizando...",
+    "syncComplete": "Sincronización completa",
+    "syncFailed": "Error en sincronización"
+  },
+  "help": {
+    "title": "Ayuda y Soporte",
+    "faq": "Preguntas Frecuentes",
+    "contact": "Contactar Soporte",
+    "tutorials": "Tutoriales",
+    "voiceCommands": "Comandos de Voz",
+    "troubleshooting": "Solución de Problemas",
+    "about": "Acerca de WhatsOpí",
+    "version": "Versión {{version}}",
+    "support": {
+      "phone": "Teléfono: {{phone}}",
+      "email": "Correo: {{email}}",
+      "whatsapp": "WhatsApp: {{number}}",
+      "hours": "Horario: 8:00 AM - 8:00 PM"
+    }
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "back": "Volver",
+    "next": "Siguiente",
+    "previous": "Anterior",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "warning": "Advertencia",
+    "info": "Información",
+    "yes": "Sí",
+    "no": "No",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "sort": "Ordenar",
+    "share": "Compartir",
+    "copy": "Copiar",
+    "close": "Cerrar",
+    "open": "Abrir",
+    "retry": "Reintentar",
+    "continue": "Continuar",
+    "finish": "Finalizar",
+    "optional": "Opcional",
+    "required": "Requerido"
+  },
+  "errors": {
+    "network": "Error de conexión. Verifica tu internet.",
+    "generic": "Algo salió mal. Intenta de nuevo.",
+    "notFound": "No encontrado",
+    "unauthorized": "No autorizado",
+    "forbidden": "Acceso denegado",
+    "serverError": "Error del servidor",
+    "validation": "Error de validación",
+    "timeout": "Tiempo de espera agotado",
+    "offline": "Sin conexión a internet"
+  },
+  "greetings": {
+    "morning": "¡Buenos días!",
+    "afternoon": "¡Buenas tardes!",
+    "evening": "¡Buenas noches!",
+    "welcome": "¡Bienvenido!",
+    "welcomeBack": "¡Bienvenido de vuelta!",
+    "klk": "¡Klk loco!",
+    "queTal": "¿Qué tal todo?"
+  },
+  "dominican": {
+    "slang": {
+      "klk": "¿Qué tal?",
+      "loco": "amigo/a",
+      "jevi": "genial",
+      "brutal": "excelente",
+      "manigua": "lugar remoto",
+      "chin": "un poco"
+    },
+    "places": {
+      "santodomingo": "Santo Domingo",
+      "santiago": "Santiago",
+      "puntacana": "Punta Cana",
+      "laromana": "La Romana",
+      "puertoplata": "Puerto Plata"
+    }
+  }
+}

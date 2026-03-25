@@ -1,0 +1,155 @@
+# Multi-stage Dockerfile for WhatsOpí API Backend
+# PCI DSS Level 1 and Dominican Law 172-13 compliant with hardened security
+# Optimized for financial services in the Dominican Republic
+
+# Security: Use specific Node.js version with Alpine Linux for minimal attack surface
+FROM node:18.19.0-alpine3.18 AS builder
+
+# Security: Set build arguments for reproducible builds
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION="1.0.0"
+
+# Security: Create non-root user early in build process
+RUN addgroup -g 1001 -S whatsopi && \
+    adduser -S -D -H -u 1001 -s /sbin/nologin whatsopi whatsopi
+
+# Security: Update packages with specific versions for consistency
+RUN apk update && apk upgrade && \
+    apk add --no-cache \
+    python3=~3.11 \
+    make=~4.4.1 \
+    g++=~12.2.1 \
+    git=~2.40 \
+    openssl=~3.1 \
+    ca-certificates=~20230506 \
+    && rm -rf /var/cache/apk/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
+
+# Set secure working directory
+WORKDIR /app
+
+# Security: Copy package files with proper ownership for dependency analysis
+COPY --chown=whatsopi:whatsopi src/api/package*.json ./
+COPY --chown=whatsopi:whatsopi src/api/tsconfig*.json ./
+
+# Security: Switch to non-root user for dependency installation
+USER whatsopi
+
+# Install dependencies with security audit
+RUN npm ci --only=production --no-audit --no-fund && \
+    npm cache clean --force && \
+    # Security audit - fail build if high/critical vulnerabilities
+    npm audit --audit-level=high
+
+# Copy source code and database schema
+COPY --chown=whatsopi:whatsopi src/api/src ./src
+COPY --chown=whatsopi:whatsopi src/api/prisma ./prisma
+
+# Generate Prisma client with type safety
+RUN npx prisma generate
+
+# Build the application with optimization
+RUN npm run build
+
+# Security hardening: Remove development dependencies
+RUN npm prune --production
+
+# Runtime stage - Distroless Node.js for maximum security
+FROM gcr.io/distroless/nodejs18-debian11:nonroot AS runtime
+
+# Security: Set runtime arguments
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION="1.0.0"
+
+# Set working directory
+WORKDIR /app
+
+# Security: Copy CA certificates for HTTPS connections
+COPY --from=builder --chown=nonroot:nonroot /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy built application with minimal footprint
+COPY --from=builder --chown=nonroot:nonroot /app/dist ./dist
+COPY --from=builder --chown=nonroot:nonroot /app/node_modules ./node_modules
+COPY --from=builder --chown=nonroot:nonroot /app/package*.json ./
+COPY --from=builder --chown=nonroot:nonroot /app/prisma ./prisma
+
+# Security: Set strict environment variables for production
+ENV NODE_ENV=production \
+    NODE_OPTIONS="--enable-source-maps --max-old-space-size=512 --max-http-header-size=8192" \
+    PORT=8080 \
+    TZ=America/Santo_Domingo \
+    # Dominican Republic localization
+    DEFAULT_LANGUAGE=es-DO \
+    DEFAULT_CURRENCY=DOP \
+    DEFAULT_COUNTRY=DO \
+    CULTURAL_CONTEXT=dominican \
+    REGION=caribbean \
+    # Compliance settings
+    COMPLIANCE_MODE=law-172-13 \
+    PCI_DSS_LEVEL=1 \
+    AML_CFT_ENABLED=true \
+    # Security settings
+    HELMET_ENABLED=true \
+    RATE_LIMITING_ENABLED=true \
+    CORS_ENABLED=true \
+    CSP_ENABLED=true \
+    # Encryption settings
+    ENCRYPTION_AT_REST=true \
+    ENCRYPTION_IN_TRANSIT=true \
+    JWT_ALGORITHM=RS256 \
+    # Audit logging
+    AUDIT_LOGGING_ENABLED=true \
+    PRIVACY_LOGGING_ENABLED=true \
+    TRANSACTION_LOGGING_ENABLED=true
+
+# Security: Use distroless nonroot user (uid 65532)
+USER nonroot
+
+# Expose port (non-privileged)
+EXPOSE 8080
+
+# Security: Enhanced health check for Caribbean network conditions
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
+    CMD ["/nodejs/bin/node", "-e", "require('http').get('http://localhost:8080/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+
+# Security: Use exec form and specify full path
+CMD ["/nodejs/bin/node", "dist/server.js"]
+
+# Security and compliance labels with OpenContainer standard
+LABEL maintainer="devops@whatsopi.do" \
+      version="${VERSION}" \
+      build-date="${BUILD_DATE}" \
+      vcs-ref="${VCS_REF}" \
+      description="WhatsOpí API - PCI DSS Level 1 & Law 172-13 Compliant" \
+      region="DominicanRepublic" \
+      timezone="America/Santo_Domingo" \
+      compliance.law-172-13="enabled" \
+      compliance.pci-dss="level-1" \
+      compliance.aml-cft="enabled" \
+      security.scan="trivy,snyk,clair" \
+      security.user="nonroot" \
+      security.distroless="true" \
+      security.readonly-rootfs="true" \
+      performance.memory-limit="512Mi" \
+      performance.cpu-limit="500m" \
+      org.opencontainers.image.title="WhatsOpí API Backend" \
+      org.opencontainers.image.description="Secure API backend for Dominican fintech platform" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.vendor="Exxede Investments" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.documentation="https://docs.whatsopi.do/api" \
+      org.opencontainers.image.source="https://github.com/exxede/whatsopi" \
+      org.opencontainers.image.base.name="gcr.io/distroless/nodejs18-debian11:nonroot"
+
+# Alternative runtime stage for development/debugging (commented out for production)
+# FROM node:18.19.0-alpine3.18 AS runtime-debug
+# COPY --from=builder /app /app
+# WORKDIR /app
+# USER whatsopi
+# EXPOSE 8080
+# CMD ["node", "--inspect=0.0.0.0:9229", "dist/server.js"]

@@ -1,0 +1,539 @@
+# Production Docker Compose for WhatsOpí
+# PCI DSS Level 1 and Dominican Law 172-13 compliant
+# Security-hardened with network isolation and resource limits
+
+version: '3.8'
+
+# Named volumes for persistent data
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/whatsopi/data/postgres
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/whatsopi/data/redis
+  app_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/whatsopi/logs
+  app_uploads:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/whatsopi/uploads
+
+# Secure networks with isolation
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+  backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+  database:
+    driver: bridge
+    internal: true  # No external access
+    ipam:
+      config:
+        - subnet: 172.20.3.0/24
+
+# Secrets management
+secrets:
+  database_password:
+    external: true
+  redis_auth_token:
+    external: true
+  jwt_secret:
+    external: true
+  encryption_key:
+    external: true
+  whatsapp_token:
+    external: true
+  payment_api_key:
+    external: true
+
+services:
+  # Frontend service
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        BUILD_DATE: ${BUILD_DATE:-}
+        VCS_REF: ${VCS_REF:-}
+        VERSION: ${VERSION:-1.0.0}
+      target: runtime
+    image: whatsopi/frontend:${VERSION:-latest}
+    container_name: whatsopi-frontend
+    restart: unless-stopped
+    
+    # Security configurations
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,noexec,nosuid,nodev
+      - /var/cache/nginx:size=100M,noexec,nosuid,nodev
+      - /var/run:size=10M,noexec,nosuid,nodev
+    
+    # Resource limits for stability
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    
+    # Network configuration
+    networks:
+      - frontend
+    
+    # Port mapping (non-privileged)
+    ports:
+      - "8080:8080"
+    
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Santo_Domingo
+      - NGINX_WORKER_PROCESSES=auto
+      - PCI_DSS_LEVEL=1
+      - LAW_172_13_COMPLIANT=true
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        labels: "service,compliance,security"
+    
+    # Labels for monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`whatsopi.do`)"
+      - "traefik.http.routers.frontend.tls=true"
+      - "service=frontend"
+      - "compliance=pci-dss,law-172-13"
+      - "security.level=high"
+
+  # Backend API service
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      args:
+        BUILD_DATE: ${BUILD_DATE:-}
+        VCS_REF: ${VCS_REF:-}
+        VERSION: ${VERSION:-1.0.0}
+      target: runtime
+    image: whatsopi/backend:${VERSION:-latest}
+    container_name: whatsopi-backend
+    restart: unless-stopped
+    
+    # Security configurations
+    user: "65532:65532"  # nonroot user from distroless
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,noexec,nosuid,nodev
+      - /app/temp:size=50M,noexec,nosuid,nodev
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    cap_drop:
+      - ALL
+    
+    # Network configuration
+    networks:
+      - frontend
+      - backend
+      - database
+    
+    # Port mapping
+    ports:
+      - "8081:8080"
+    
+    # Secrets
+    secrets:
+      - database_password
+      - redis_auth_token
+      - jwt_secret
+      - encryption_key
+      - whatsapp_token
+      - payment_api_key
+    
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Santo_Domingo
+      - PORT=8080
+      - DATABASE_URL=postgresql://whatsopi:$(cat /run/secrets/database_password)@postgres:5432/whatsopi
+      - REDIS_URL=redis://:$(cat /run/secrets/redis_auth_token)@redis:6379
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - ENCRYPTION_KEY_FILE=/run/secrets/encryption_key
+      - WHATSAPP_TOKEN_FILE=/run/secrets/whatsapp_token
+      - PAYMENT_API_KEY_FILE=/run/secrets/payment_api_key
+      - PCI_DSS_LEVEL=1
+      - LAW_172_13_COMPLIANT=true
+      - AUDIT_LOGGING_ENABLED=true
+      - ENCRYPTION_AT_REST=true
+      - ENCRYPTION_IN_TRANSIT=true
+    
+    # Volumes for logs and uploads
+    volumes:
+      - app_logs:/app/logs:rw
+      - app_uploads:/app/uploads:rw
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "require('http').get('http://localhost:8080/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service,compliance,security,audit"
+    
+    # Labels
+    labels:
+      - "service=backend"
+      - "compliance=pci-dss,law-172-13,aml-cft"
+      - "security.level=critical"
+    
+    # Dependencies
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15.5-alpine3.18
+    container_name: whatsopi-postgres
+    restart: unless-stopped
+    
+    # Security configurations
+    user: "999:999"  # postgres user
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,noexec,nosuid,nodev
+      - /var/run/postgresql:size=10M,noexec,nosuid,nodev
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    
+    # Network (isolated)
+    networks:
+      - database
+    
+    # Secrets
+    secrets:
+      - database_password
+    
+    # Environment variables
+    environment:
+      - POSTGRES_DB=whatsopi
+      - POSTGRES_USER=whatsopi
+      - POSTGRES_PASSWORD_FILE=/run/secrets/database_password
+      - POSTGRES_INITDB_ARGS="--encoding=UTF8 --locale=es_DO.UTF-8"
+      - TZ=America/Santo_Domingo
+      # Security settings
+      - POSTGRES_HOST_AUTH_METHOD=scram-sha-256
+      - POSTGRES_INITDB_WALDIR=/var/lib/postgresql/wal
+    
+    # Persistent storage
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:rw
+      - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./docker/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whatsopi -d whatsopi"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # PostgreSQL configuration
+    command: |
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/server.crt
+      -c ssl_key_file=/var/lib/postgresql/server.key
+      -c log_statement=all
+      -c log_connections=on
+      -c log_disconnections=on
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+        labels: "service,database,compliance"
+    
+    # Labels
+    labels:
+      - "service=database"
+      - "compliance=pci-dss,law-172-13"
+      - "security.level=critical"
+
+  # Redis cache
+  redis:
+    image: redis:7.2.3-alpine3.18
+    container_name: whatsopi-redis
+    restart: unless-stopped
+    
+    # Security configurations
+    user: "999:999"  # redis user
+    read_only: true
+    tmpfs:
+      - /tmp:size=50M,noexec,nosuid,nodev
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    
+    # Network
+    networks:
+      - backend
+      - database
+    
+    # Secrets
+    secrets:
+      - redis_auth_token
+    
+    # Persistent storage
+    volumes:
+      - redis_data:/data:rw
+      - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
+    
+    # Redis configuration with authentication
+    command: |
+      redis-server /etc/redis/redis.conf
+      --requirepass $(cat /run/secrets/redis_auth_token)
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "$(cat /run/secrets/redis_auth_token)", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        labels: "service,cache"
+    
+    # Labels
+    labels:
+      - "service=cache"
+      - "compliance=pci-dss"
+      - "security.level=medium"
+
+  # Monitoring and logging
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: whatsopi-promtail
+    restart: unless-stopped
+    
+    # Security configurations
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=50M,noexec,nosuid,nodev
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    
+    # Network
+    networks:
+      - backend
+    
+    # Volumes for log collection
+    volumes:
+      - app_logs:/var/log/app:ro
+      - ./docker/promtail/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    
+    # Command
+    command: -config.file=/etc/promtail/config.yml
+    
+    # Labels
+    labels:
+      - "service=logging"
+      - "monitoring=true"
+
+  # Security scanner (runs periodically)
+  security-scanner:
+    image: aquasec/trivy:0.46.0
+    container_name: whatsopi-security-scanner
+    restart: "no"  # Run on-demand
+    
+    # Security configurations
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,noexec,nosuid,nodev
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    
+    # Volume for Docker socket (read-only)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./security-reports:/reports:rw
+    
+    # Command to scan all running containers
+    command: |
+      image --severity HIGH,CRITICAL
+      --format json
+      --output /reports/security-scan-$(date +%Y%m%d).json
+      whatsopi/frontend:${VERSION:-latest}
+      whatsopi/backend:${VERSION:-latest}
+    
+    # Labels
+    labels:
+      - "service=security"
+      - "scanner=trivy"
+
+# Health check and dependency management
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
+# Common security options
+x-security-defaults: &security-defaults
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+
+# Common logging configuration
+x-logging-defaults: &logging-defaults
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "5"

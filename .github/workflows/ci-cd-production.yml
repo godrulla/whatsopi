@@ -1,0 +1,619 @@
+name: WhatsOpí Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: 'us-east-1'
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  DEPLOYMENT_ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+
+jobs:
+  # Security and Vulnerability Scanning
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Semgrep security analysis
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/pci-dss
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Dependency vulnerability check
+        run: |
+          npm audit --audit-level moderate
+          pip-audit --desc --format=json --output=pip-audit-results.json || true
+
+  # Code Quality and Testing
+  test-frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript type checking
+        run: npm run typecheck
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm run test -- --coverage --reporter=junit --outputFile=test-results.xml
+
+      - name: Run cultural appropriateness tests
+        run: npm run test:cultural
+
+      - name: Run voice interface tests
+        run: npm run test:voice
+
+      - name: Run WhatsApp integration tests
+        run: npm run test:whatsapp
+
+      - name: Run offline PWA tests
+        run: npm run test:offline
+
+      - name: Run security compliance tests
+        run: npm run test:security
+
+      - name: Upload test results
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: Frontend Test Results
+          path: test-results.xml
+          reporter: jest-junit
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: frontend
+
+  # Backend API Testing
+  test-backend:
+    name: Backend API Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: whatsopi_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        working-directory: ./src/api
+        run: npm ci
+
+      - name: Run Prisma migrations
+        working-directory: ./src/api
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/whatsopi_test
+
+      - name: Run backend unit tests
+        working-directory: ./src/api
+        run: npm test -- --coverage
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/whatsopi_test
+          REDIS_URL: redis://localhost:6379
+
+      - name: Run API integration tests
+        working-directory: ./src/api
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/whatsopi_test
+          REDIS_URL: redis://localhost:6379
+
+      - name: Run Dominican payment systems tests
+        working-directory: ./src/api
+        run: npm run test:payments
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/whatsopi_test
+
+  # End-to-End Testing
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: [test-frontend, test-backend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        run: npx playwright test
+        env:
+          CI: true
+
+      - name: Run Dominican user journey tests
+        run: npx playwright test tests/e2e/dominican-user-journeys.spec.ts
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+  # PCI DSS Compliance Testing
+  pci-compliance:
+    name: PCI DSS Compliance Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run PCI DSS compliance tests
+        run: npm run test:pci-compliance
+
+      - name: Validate encryption implementations
+        run: |
+          node scripts/validate-encryption.js
+          node scripts/validate-tokenization.js
+
+      - name: Check for prohibited data storage
+        run: |
+          grep -r "cvv\|pin\|magnetic" src/ || echo "No prohibited data storage found"
+          node scripts/check-data-retention.js
+
+  # Dominican Law 172-13 Compliance
+  privacy-compliance:
+    name: Dominican Privacy Law Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Law 172-13 compliance tests
+        run: npm run test:dominican-privacy
+
+      - name: Validate privacy notice implementations
+        run: node scripts/validate-privacy-notices.js
+
+      - name: Check data subject rights implementation
+        run: node scripts/validate-data-rights.js
+
+      - name: Verify consent management
+        run: node scripts/validate-consent-management.js
+
+  # Build and Package
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [security-scan, test-frontend, test-backend, pci-compliance, privacy-compliance]
+    outputs:
+      frontend-image: ${{ steps.build-frontend.outputs.image }}
+      backend-image: ${{ steps.build-backend.outputs.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build frontend Docker image
+        id: build-frontend
+        run: |
+          IMAGE_TAG=${GITHUB_SHA:0:8}
+          IMAGE_URI=$ECR_REGISTRY/whatsopi-frontend:$IMAGE_TAG
+          
+          docker build -f docker/Dockerfile.frontend \
+            --build-arg NODE_ENV=production \
+            --build-arg VITE_API_URL=https://api.whatsopi.do \
+            --build-arg VITE_ENVIRONMENT=$DEPLOYMENT_ENVIRONMENT \
+            -t $IMAGE_URI .
+          
+          docker push $IMAGE_URI
+          echo "image=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Build backend Docker image
+        id: build-backend
+        run: |
+          IMAGE_TAG=${GITHUB_SHA:0:8}
+          IMAGE_URI=$ECR_REGISTRY/whatsopi-backend:$IMAGE_TAG
+          
+          docker build -f docker/Dockerfile.api \
+            --build-arg NODE_ENV=production \
+            -t $IMAGE_URI .
+          
+          docker push $IMAGE_URI
+          echo "image=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Scan Docker images for vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy image --severity HIGH,CRITICAL \
+            ${{ steps.build-frontend.outputs.image }}
+          
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy image --severity HIGH,CRITICAL \
+            ${{ steps.build-backend.outputs.image }}
+
+  # Staging Deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, e2e-tests]
+    if: github.ref == 'refs/heads/develop' || (github.event.inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: https://staging.whatsopi.do
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to EKS staging
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name whatsopi-staging-eks
+          
+          # Update Kubernetes deployments
+          kubectl set image deployment/whatsopi-frontend \
+            whatsopi-frontend=${{ needs.build.outputs.frontend-image }} \
+            -n staging
+          
+          kubectl set image deployment/whatsopi-backend \
+            whatsopi-backend=${{ needs.build.outputs.backend-image }} \
+            -n staging
+          
+          # Wait for rollout
+          kubectl rollout status deployment/whatsopi-frontend -n staging --timeout=300s
+          kubectl rollout status deployment/whatsopi-backend -n staging --timeout=300s
+
+      - name: Run staging smoke tests
+        run: |
+          # Wait for deployment to be ready
+          sleep 30
+          
+          # Run basic health checks
+          curl -f https://staging.whatsopi.do/health || exit 1
+          curl -f https://api-staging.whatsopi.do/health || exit 1
+
+      - name: Run staging integration tests
+        run: |
+          npm ci
+          npx playwright test --grep @staging
+        env:
+          BASE_URL: https://staging.whatsopi.do
+
+  # Production Deployment
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, deploy-staging]
+    if: github.ref == 'refs/heads/main' || (github.event.inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://whatsopi.do
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Pre-deployment verification
+        run: |
+          # Verify all required secrets are present
+          echo "Verifying deployment prerequisites..."
+          
+          # Check database connectivity
+          aws rds describe-db-clusters --db-cluster-identifier whatsopi-prod-cluster
+          
+          # Verify ECR images exist
+          aws ecr describe-images --repository-name whatsopi-frontend --image-ids imageTag=${GITHUB_SHA:0:8}
+          aws ecr describe-images --repository-name whatsopi-backend --image-ids imageTag=${GITHUB_SHA:0:8}
+
+      - name: Blue-Green Deployment Setup
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name whatsopi-prod-eks
+          
+          # Create green deployment
+          kubectl apply -f k8s/production/green-deployment.yaml
+          
+          # Update green deployment with new images
+          kubectl set image deployment/whatsopi-frontend-green \
+            whatsopi-frontend=${{ needs.build.outputs.frontend-image }} \
+            -n production
+          
+          kubectl set image deployment/whatsopi-backend-green \
+            whatsopi-backend=${{ needs.build.outputs.backend-image }} \
+            -n production
+
+      - name: Green Environment Validation
+        run: |
+          # Wait for green deployment to be ready
+          kubectl rollout status deployment/whatsopi-frontend-green -n production --timeout=600s
+          kubectl rollout status deployment/whatsopi-backend-green -n production --timeout=600s
+          
+          # Get green service endpoint
+          GREEN_ENDPOINT=$(kubectl get service whatsopi-frontend-green -n production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          
+          # Run production validation tests against green environment
+          curl -f http://$GREEN_ENDPOINT/health || exit 1
+          
+          # Run comprehensive validation
+          npm ci
+          npx playwright test --grep @production-validation
+        env:
+          GREEN_ENDPOINT: ${{ env.GREEN_ENDPOINT }}
+
+      - name: Switch Traffic to Green (Blue-Green Swap)
+        run: |
+          # Update service selector to point to green deployment
+          kubectl patch service whatsopi-frontend -n production -p '{"spec":{"selector":{"version":"green"}}}'
+          kubectl patch service whatsopi-backend -n production -p '{"spec":{"selector":{"version":"green"}}}'
+          
+          # Wait for traffic switch
+          sleep 60
+          
+          # Verify production is healthy
+          curl -f https://whatsopi.do/health || exit 1
+          curl -f https://api.whatsopi.do/health || exit 1
+
+      - name: Post-deployment Validation
+        run: |
+          # Run production smoke tests
+          npx playwright test --grep @production-smoke
+          
+          # Monitor key metrics for 5 minutes
+          python scripts/monitor-deployment.py --duration 300
+
+      - name: Cleanup Old Blue Deployment
+        run: |
+          # Keep blue deployment for quick rollback (cleanup after 24h)
+          kubectl annotate deployment whatsopi-frontend-blue -n production \
+            deployment.kubernetes.io/cleanup-time=$(date -d '+24 hours' --iso-8601=seconds)
+          kubectl annotate deployment whatsopi-backend-blue -n production \
+            deployment.kubernetes.io/cleanup-time=$(date -d '+24 hours' --iso-8601=seconds)
+
+  # Security Monitoring Setup
+  security-monitoring:
+    name: Security Monitoring Setup
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Enable AWS GuardDuty
+        run: |
+          aws guardduty list-detectors --region $AWS_REGION || \
+          aws guardduty create-detector --enable --region $AWS_REGION
+
+      - name: Configure CloudTrail
+        run: |
+          aws cloudtrail describe-trails --trail-name-list whatsopi-audit-trail || \
+          aws cloudtrail create-trail \
+            --name whatsopi-audit-trail \
+            --s3-bucket-name whatsopi-audit-logs-${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Set up VPC Flow Logs
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=whatsopi-prod-vpc" --query 'Vpcs[0].VpcId' --output text)
+          aws ec2 create-flow-logs \
+            --resource-type VPC \
+            --resource-ids $VPC_ID \
+            --traffic-type ALL \
+            --log-destination-type cloud-watch-logs \
+            --log-group-name /aws/vpc/flowlogs
+
+  # Performance Monitoring
+  performance-monitoring:
+    name: Performance Monitoring
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run Lighthouse CI
+        run: |
+          npm install -g @lhci/cli@0.12.x
+          lhci autorun
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+
+      - name: Caribbean Network Performance Test
+        run: |
+          # Test from multiple Caribbean locations using external service
+          curl -X POST "https://api.pingdom.com/api/3.1/checks" \
+            -H "Authorization: Bearer ${{ secrets.PINGDOM_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "WhatsOpí Caribbean Performance",
+              "host": "whatsopi.do",
+              "type": "http",
+              "probe_filters": ["region:CARIBBEAN", "region:SOUTH_AMERICA"]
+            }'
+
+  # Rollback Job (Manual Trigger)
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'rollback'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Rollback to Blue Deployment
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name whatsopi-prod-eks
+          
+          # Switch traffic back to blue
+          kubectl patch service whatsopi-frontend -n production -p '{"spec":{"selector":{"version":"blue"}}}'
+          kubectl patch service whatsopi-backend -n production -p '{"spec":{"selector":{"version":"blue"}}}'
+          
+          # Verify rollback
+          sleep 60
+          curl -f https://whatsopi.do/health || exit 1
+
+  # Notification
+  notify:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-production, security-monitoring, performance-monitoring]
+    if: always()
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#whatsopi-deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+
+      - name: Notify WhatsApp (Critical Issues)
+        if: failure()
+        run: |
+          curl -X POST "https://api.whatsapp.com/send" \
+            -H "Authorization: Bearer ${{ secrets.WHATSAPP_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "messaging_product": "whatsapp",
+              "to": "${{ secrets.EMERGENCY_WHATSAPP_NUMBER }}",
+              "type": "text",
+              "text": {
+                "body": "🚨 WhatsOpí Production Deployment FAILED! Check GitHub Actions immediately."
+              }
+            }'

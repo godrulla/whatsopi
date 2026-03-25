@@ -1,0 +1,408 @@
+# Alertmanager configuration for WhatsOpí
+# PCI DSS Level 1 and Dominican Law 172-13 compliant alerting
+# Optimized for Caribbean region with multiple notification channels
+
+global:
+  # SMTP configuration for Dominican Republic
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@whatsopi.do'
+  smtp_auth_username: 'alerts@whatsopi.do'
+  smtp_auth_password_file: '/etc/alertmanager/smtp_password'
+  smtp_require_tls: true
+  
+  # WhatsApp configuration for critical alerts
+  whatsapp_api_url: 'https://graph.facebook.com/v18.0'
+  whatsapp_token_file: '/etc/alertmanager/whatsapp_token'
+  
+  # Slack configuration
+  slack_api_url: 'https://hooks.slack.com/services'
+
+# Template files for localized messages
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10m
+  repeat_interval: 1h
+  receiver: 'default-receiver'
+  
+  routes:
+    # Critical system alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      group_interval: 2m
+      repeat_interval: 15m
+      
+    # Security and compliance alerts
+    - match_re:
+        alertname: '(SuspiciousPaymentActivity|DataRetentionPolicyViolation|EncryptionFailure|HighFailedLoginAttempts)'
+      receiver: 'security-compliance-alerts'
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 30m
+      
+    # PCI DSS specific alerts
+    - match:
+        compliance: pci_dss
+      receiver: 'pci-compliance-alerts'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+      
+    # Business critical alerts
+    - match_re:
+        alertname: '(PostgreSQLDown|WhatsOpiApplicationDown|HighAPILatency)'
+      receiver: 'business-critical-alerts'
+      group_wait: 0s
+      group_interval: 2m
+      repeat_interval: 10m
+      
+    # Dominican Republic network issues
+    - match:
+        region: dominican_republic
+      receiver: 'dominican-operations-alerts'
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 2h
+      
+    # Payment system alerts
+    - match:
+        service: payments
+      receiver: 'payment-system-alerts'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 30m
+      
+    # WhatsApp integration alerts
+    - match:
+        service: whatsapp
+      receiver: 'whatsapp-integration-alerts'
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 1h
+
+# Inhibition rules to reduce noise
+inhibit_rules:
+  # Inhibit lower severity alerts when critical alerts are firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']
+    
+  # Inhibit individual service alerts when entire application is down
+  - source_match:
+      alertname: 'WhatsOpiApplicationDown'
+    target_match_re:
+      alertname: '(HighAPILatency|DatabaseConnectivity|RedisDown)'
+
+# Receiver configurations
+receivers:
+  # Default receiver
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'devops@whatsopi.do'
+        subject: '[WhatsOpí] {{ .GroupLabels.alertname }} - {{ .GroupLabels.severity | title }}'
+        body: |
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Description:** {{ .Annotations.description }}
+          **Severity:** {{ .Labels.severity }}
+          **Region:** {{ .Labels.region | default "N/A" }}
+          **Time:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ if .Annotations.runbook_url }}**Runbook:** {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+          
+          *This alert was generated for WhatsOpí production environment in Dominican Republic*
+    
+    slack_configs:
+      - api_url_file: '/etc/alertmanager/slack_webhook_url'
+        channel: '#whatsopi-alerts'
+        title: 'WhatsOpí Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Time:* {{ .StartsAt.Format "15:04:05 MST" }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+
+  # Critical alerts - multiple channels including WhatsApp
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'armando@exxede.com, devops@whatsopi.do, oncall@whatsopi.do'
+        subject: '🚨 [CRITICAL] WhatsOpí - {{ .GroupLabels.alertname }}'
+        headers:
+          Priority: 'high'
+        body: |
+          ⚠️ **CRITICAL ALERT** ⚠️
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Description:** {{ .Annotations.description }}
+          **Service:** {{ .Labels.service | default "Unknown" }}
+          **Region:** Dominican Republic
+          **Started At:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ if .Annotations.runbook_url }}
+          **Immediate Action Required:** {{ .Annotations.runbook_url }}
+          {{ end }}
+          {{ end }}
+          
+          This requires immediate attention to maintain 99.9% uptime SLA.
+    
+    slack_configs:
+      - api_url_file: '/etc/alertmanager/slack_webhook_url'
+        channel: '#whatsopi-critical'
+        username: 'WhatsOpí AlertManager'
+        icon_emoji: ':rotating_light:'
+        title: ':rotating_light: CRITICAL ALERT - {{ .GroupLabels.alertname }}'
+        text: |
+          <!channel> **CRITICAL SYSTEM ALERT**
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Impact:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service | default "System" }}
+          *Started:* {{ .StartsAt.Format "15:04:05 MST" }}
+          {{ if .Annotations.runbook_url }}*Action Required:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+          
+          **Dominican Republic Production Environment**
+        color: 'danger'
+    
+    # WhatsApp notification for critical alerts
+    webhook_configs:
+      - url: 'http://whatsapp-webhook:8080/send-alert'
+        http_config:
+          bearer_token_file: '/etc/alertmanager/whatsapp_webhook_token'
+        send_resolved: true
+        title: 'WhatsOpí Critical Alert'
+        text: |
+          🚨 *CRITICAL ALERT*
+          {{ range .Alerts }}
+          *Service:* {{ .Labels.service | default "WhatsOpí System" }}
+          *Issue:* {{ .Annotations.summary }}
+          *Started:* {{ .StartsAt.Format "15:04 MST" }}
+          {{ if .Annotations.whatsapp_alert }}
+          This alert requires immediate attention for PCI DSS compliance.
+          {{ end }}
+          {{ end }}
+
+  # Security and compliance alerts
+  - name: 'security-compliance-alerts'
+    email_configs:
+      - to: 'security@whatsopi.do, compliance@whatsopi.do, dpo@whatsopi.do'
+        subject: '[SECURITY] WhatsOpí Compliance Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          🔒 **SECURITY/COMPLIANCE ALERT** 🔒
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Description:** {{ .Annotations.description }}
+          **Compliance Impact:** {{ .Labels.compliance | default "General Security" }}
+          **Time:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ if .Annotations.runbook_url }}**Response Procedure:** {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+          
+          **Regulatory Context:**
+          - Dominican Law 172-13: Personal Data Protection
+          - PCI DSS Level 1: Payment Card Industry Security
+          - AML/CFT: Anti-Money Laundering Compliance
+          
+          This alert has been logged for audit purposes.
+    
+    slack_configs:
+      - api_url_file: '/etc/alertmanager/slack_webhook_url'
+        channel: '#whatsopi-security'
+        username: 'Security AlertManager'
+        icon_emoji: ':shield:'
+        title: ':shield: Security/Compliance Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          **SECURITY COMPLIANCE ALERT**
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Impact:* {{ .Annotations.description }}
+          *Compliance:* {{ .Labels.compliance | default "Security" }}
+          *Time:* {{ .StartsAt.Format "15:04:05 MST" }}
+          {{ if .Annotations.compliance_alert }}*Audit Log:* This event has been recorded for compliance reporting{{ end }}
+          {{ end }}
+        color: 'warning'
+
+  # PCI DSS compliance specific alerts
+  - name: 'pci-compliance-alerts'
+    email_configs:
+      - to: 'pci-officer@whatsopi.do, security@whatsopi.do'
+        subject: '[PCI DSS] Compliance Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          💳 **PCI DSS COMPLIANCE ALERT** 💳
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Description:** {{ .Annotations.description }}
+          **PCI DSS Requirement:** {{ .Labels.pci_requirement | default "General" }}
+          **Severity:** {{ .Labels.severity }}
+          **Time:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+          
+          **Required Actions:**
+          1. Investigate the security event immediately
+          2. Document findings in PCI DSS compliance log
+          3. Implement corrective measures if needed
+          4. Update QSA if this affects compliance status
+          
+          **Dominican Republic PCI DSS Level 1 Requirements:**
+          This alert relates to our Level 1 merchant compliance obligations.
+
+  # Business critical alerts
+  - name: 'business-critical-alerts'
+    email_configs:
+      - to: 'armando@exxede.com, cto@whatsopi.do, devops@whatsopi.do'
+        subject: '[BUSINESS CRITICAL] WhatsOpí - {{ .GroupLabels.alertname }}'
+        body: |
+          📈 **BUSINESS CRITICAL ALERT** 📈
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Business Impact:** {{ .Annotations.description }}
+          **Service Affected:** {{ .Labels.service | default "Core System" }}
+          **Dominican Users Impact:** Potentially affecting Dominican Republic users
+          **Started At:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+          
+          **SLA Impact:** This may affect our 99.9% uptime commitment
+          **Market Impact:** Dominican Republic fintech operations
+    
+    slack_configs:
+      - api_url_file: '/etc/alertmanager/slack_webhook_url'
+        channel: '#whatsopi-business'
+        title: ':chart_with_upwards_trend: Business Critical Alert'
+        text: |
+          **BUSINESS IMPACT ALERT**
+          {{ range .Alerts }}
+          *Service:* {{ .Labels.service | default "WhatsOpí System" }}
+          *Impact:* {{ .Annotations.description }}
+          *Market:* Dominican Republic FinTech
+          *SLA Risk:* {{ if eq .Labels.severity "critical" }}HIGH{{ else }}MEDIUM{{ end }}
+          {{ end }}
+        color: '#ff9900'
+
+  # Dominican Republic operations
+  - name: 'dominican-operations-alerts'
+    email_configs:
+      - to: 'operations-dr@whatsopi.do, devops@whatsopi.do'
+        subject: '[DR OPS] Dominican Republic Operations - {{ .GroupLabels.alertname }}'
+        body: |
+          🇩🇴 **DOMINICAN REPUBLIC OPERATIONS ALERT** 🇩🇴
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Local Impact:** {{ .Annotations.description }}
+          **Region:** Dominican Republic
+          **Time (Local):** {{ .StartsAt.In (parseTimezone "America/Santo_Domingo").Format "2006-01-02 15:04:05 AST" }}
+          {{ end }}
+          
+          **Regional Context:**
+          - Caribbean network conditions may be affected
+          - Dominican ISP connectivity impact possible
+          - Local user experience considerations
+    
+    webhook_configs:
+      - url: 'http://dominican-operations-webhook:8080/alert'
+        title: 'Dominican Operations Alert'
+        text: |
+          {{ range .Alerts }}
+          Región: República Dominicana
+          Alerta: {{ .Annotations.summary }}
+          Impacto: {{ .Annotations.description }}
+          Hora Local: {{ .StartsAt.Format "15:04 AST" }}
+          {{ end }}
+
+  # Payment system alerts
+  - name: 'payment-system-alerts'
+    email_configs:
+      - to: 'payments@whatsopi.do, finance@whatsopi.do, security@whatsopi.do'
+        subject: '[PAYMENTS] Payment System Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          💰 **PAYMENT SYSTEM ALERT** 💰
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Payment Impact:** {{ .Annotations.description }}
+          **Provider:** {{ .Labels.payment_provider | default "Multiple" }}
+          **Currency:** {{ .Labels.currency | default "DOP/USD" }}
+          **Time:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+          
+          **Dominican Payment Context:**
+          - May affect local bank integrations
+          - DOP currency transactions impact
+          - Mobile payment processing affected
+          
+          **Compliance Note:** This alert is recorded for financial audit purposes.
+
+  # WhatsApp integration alerts
+  - name: 'whatsapp-integration-alerts'
+    email_configs:
+      - to: 'integrations@whatsopi.do, devops@whatsopi.do'
+        subject: '[WHATSAPP] Integration Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          📱 **WHATSAPP INTEGRATION ALERT** 📱
+          
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **WhatsApp Impact:** {{ .Annotations.description }}
+          **API Endpoint:** {{ .Labels.whatsapp_endpoint | default "Business API" }}
+          **Time:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+          
+          **Dominican Market Impact:**
+          WhatsApp is the primary communication channel for Dominican users.
+          This may significantly impact user engagement and transaction flow.
+    
+    slack_configs:
+      - api_url_file: '/etc/alertmanager/slack_webhook_url'
+        channel: '#whatsopi-integrations'
+        title: ':iphone: WhatsApp Integration Alert'
+        text: |
+          **WHATSAPP INTEGRATION ISSUE**
+          {{ range .Alerts }}
+          *Issue:* {{ .Annotations.summary }}
+          *Impact:* {{ .Annotations.description }}
+          *Market Impact:* High (Primary communication channel in DR)
+          {{ end }}
+        color: '#25D366'  # WhatsApp green
+
+# Time intervals for grouping
+time_intervals:
+  - name: dominican-business-hours
+    time_intervals:
+      - times:
+        - start_time: '08:00'
+          end_time: '18:00'
+        weekdays: ['monday:friday']
+        months: ['january:december']
+    location: 'America/Santo_Domingo'
+  
+  - name: dominican-after-hours
+    time_intervals:
+      - times:
+        - start_time: '18:01'
+          end_time: '07:59'
+        weekdays: ['monday:sunday']
+      - weekdays: ['saturday', 'sunday']
+    location: 'America/Santo_Domingo'
+
+# Mute specific alerts during maintenance windows
+mute_time_intervals:
+  - name: scheduled-maintenance
+    time_intervals:
+      - times:
+        - start_time: '02:00'
+          end_time: '04:00'
+        weekdays: ['sunday']
+    location: 'America/Santo_Domingo'

@@ -1,0 +1,890 @@
+# Blue-Green Deployment Configuration for WhatsOpí Production
+# PCI DSS Level 1 and Dominican Law 172-13 compliant
+# Supports zero-downtime deployments with instant rollback capability
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    name: production
+    compliance: pci-dss-law-172-13
+    region: dominican-republic
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whatsopi-config
+  namespace: production
+  labels:
+    app: whatsopi
+    version: v1.0.0
+data:
+  NODE_ENV: "production"
+  TZ: "America/Santo_Domingo"
+  DEFAULT_LANGUAGE: "es-DO"
+  DEFAULT_CURRENCY: "DOP"
+  DEFAULT_COUNTRY: "DO"
+  CULTURAL_CONTEXT: "dominican"
+  REGION: "caribbean"
+  PCI_DSS_LEVEL: "1"
+  LAW_172_13_COMPLIANT: "true"
+  AUDIT_LOGGING_ENABLED: "true"
+  ENCRYPTION_AT_REST: "true"
+  ENCRYPTION_IN_TRANSIT: "true"
+---
+# Secret for sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: whatsopi-secrets
+  namespace: production
+  labels:
+    app: whatsopi
+type: Opaque
+data:
+  # Base64 encoded secrets (will be populated by CI/CD)
+  DATABASE_PASSWORD: ""
+  REDIS_AUTH_TOKEN: ""
+  JWT_SECRET: ""
+  ENCRYPTION_KEY: ""
+  WHATSAPP_TOKEN: ""
+  PAYMENT_API_KEY: ""
+---
+# Blue Deployment - Frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsopi-frontend-blue
+  namespace: production
+  labels:
+    app: whatsopi-frontend
+    version: blue
+    tier: frontend
+    compliance: pci-dss
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: whatsopi-frontend
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: whatsopi-frontend
+        version: blue
+        tier: frontend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: whatsopi-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: whatsopi-frontend
+        image: whatsopi/frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: NODE_ENV
+        - name: TZ
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: TZ
+        - name: PCI_DSS_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: PCI_DSS_LEVEL
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: cache-volume
+          mountPath: /var/cache/nginx
+      volumes:
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      nodeSelector:
+        workload-type: general
+      tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "general"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - whatsopi-frontend
+              topologyKey: kubernetes.io/hostname
+---
+# Green Deployment - Frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsopi-frontend-green
+  namespace: production
+  labels:
+    app: whatsopi-frontend
+    version: green
+    tier: frontend
+    compliance: pci-dss
+spec:
+  replicas: 0  # Initially scaled to 0
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: whatsopi-frontend
+      version: green
+  template:
+    metadata:
+      labels:
+        app: whatsopi-frontend
+        version: green
+        tier: frontend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: whatsopi-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: whatsopi-frontend
+        image: whatsopi/frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: NODE_ENV
+        - name: TZ
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: TZ
+        - name: PCI_DSS_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: PCI_DSS_LEVEL
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: cache-volume
+          mountPath: /var/cache/nginx
+      volumes:
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      nodeSelector:
+        workload-type: general
+      tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "general"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - whatsopi-frontend
+              topologyKey: kubernetes.io/hostname
+---
+# Blue Deployment - Backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsopi-backend-blue
+  namespace: production
+  labels:
+    app: whatsopi-backend
+    version: blue
+    tier: backend
+    compliance: pci-dss
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: whatsopi-backend
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: whatsopi-backend
+        version: blue
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/api/metrics"
+    spec:
+      serviceAccountName: whatsopi-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: whatsopi-backend
+        image: whatsopi/backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: NODE_ENV
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: REDIS_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: JWT_SECRET
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: ENCRYPTION_KEY
+        - name: WHATSAPP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: WHATSAPP_TOKEN
+        - name: PAYMENT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: PAYMENT_API_KEY
+        - name: PCI_DSS_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: PCI_DSS_LEVEL
+        - name: LAW_172_13_COMPLIANT
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: LAW_172_13_COMPLIANT
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /app/logs
+      volumes:
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: app-logs
+        emptyDir:
+          sizeLimit: 500Mi
+      nodeSelector:
+        workload-type: general
+      tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "general"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - whatsopi-backend
+              topologyKey: kubernetes.io/hostname
+---
+# Green Deployment - Backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsopi-backend-green
+  namespace: production
+  labels:
+    app: whatsopi-backend
+    version: green
+    tier: backend
+    compliance: pci-dss
+spec:
+  replicas: 0  # Initially scaled to 0
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: whatsopi-backend
+      version: green
+  template:
+    metadata:
+      labels:
+        app: whatsopi-backend
+        version: green
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/api/metrics"
+    spec:
+      serviceAccountName: whatsopi-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: whatsopi-backend
+        image: whatsopi/backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: NODE_ENV
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: REDIS_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: JWT_SECRET
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: ENCRYPTION_KEY
+        - name: WHATSAPP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: WHATSAPP_TOKEN
+        - name: PAYMENT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: whatsopi-secrets
+              key: PAYMENT_API_KEY
+        - name: PCI_DSS_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: PCI_DSS_LEVEL
+        - name: LAW_172_13_COMPLIANT
+          valueFrom:
+            configMapKeyRef:
+              name: whatsopi-config
+              key: LAW_172_13_COMPLIANT
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /app/logs
+      volumes:
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: app-logs
+        emptyDir:
+          sizeLimit: 500Mi
+      nodeSelector:
+        workload-type: general
+      tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "general"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - whatsopi-backend
+              topologyKey: kubernetes.io/hostname
+---
+# Service for Frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: whatsopi-frontend
+  namespace: production
+  labels:
+    app: whatsopi-frontend
+    tier: frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: whatsopi-frontend
+    version: blue  # Points to blue by default
+---
+# Service for Backend
+apiVersion: v1
+kind: Service
+metadata:
+  name: whatsopi-backend
+  namespace: production
+  labels:
+    app: whatsopi-backend
+    tier: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: whatsopi-backend
+    version: blue  # Points to blue by default
+---
+# Ingress for public access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whatsopi-ingress
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.class: "aws-load-balancer-controller"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT:certificate/CERT-ID
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '15'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
+    # Security headers
+    alb.ingress.kubernetes.io/actions.ssl-redirect: |
+      {
+        "Type": "redirect",
+        "RedirectConfig": {
+          "Protocol": "HTTPS",
+          "Port": "443",
+          "StatusCode": "HTTP_301"
+        }
+      }
+    alb.ingress.kubernetes.io/actions.response-headers: |
+      {
+        "Type": "fixed-response",
+        "FixedResponseConfig": {
+          "ContentType": "text/plain",
+          "StatusCode": "200",
+          "MessageBody": "OK"
+        },
+        "ResponseHeaders": {
+          "X-Frame-Options": "DENY",
+          "X-Content-Type-Options": "nosniff",
+          "X-XSS-Protection": "1; mode=block",
+          "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+          "X-PCI-DSS-Compliant": "true",
+          "X-Dominican-Law-172-13": "compliant"
+        }
+      }
+spec:
+  rules:
+  - host: whatsopi.do
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: whatsopi-backend
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: whatsopi-frontend
+            port:
+              number: 80
+  - host: api.whatsopi.do
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: whatsopi-backend
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - whatsopi.do
+    - api.whatsopi.do
+    secretName: whatsopi-tls
+---
+# HorizontalPodAutoscaler for Frontend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: whatsopi-frontend-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: whatsopi-frontend-blue
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+---
+# HorizontalPodAutoscaler for Backend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: whatsopi-backend-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: whatsopi-backend-blue
+  minReplicas: 5
+  maxReplicas: 50
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+---
+# ServiceAccount for WhatsOpí applications
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: whatsopi-service-account
+  namespace: production
+  labels:
+    app: whatsopi
+automountServiceAccountToken: true
+---
+# NetworkPolicy for security isolation
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whatsopi-network-policy
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: whatsopi-frontend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-system
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: production
+    - podSelector:
+        matchLabels:
+          app: whatsopi-backend
+    ports:
+    - protocol: TCP
+      port: 80
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: whatsopi-frontend-pdb
+  namespace: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: whatsopi-frontend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: whatsopi-backend-pdb
+  namespace: production
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: whatsopi-backend

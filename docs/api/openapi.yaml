@@ -1,0 +1,1326 @@
+openapi: 3.0.3
+info:
+  title: WhatsOpí API
+  description: |
+    **AI-Powered Digital Platform for Dominican Republic's Informal Economy**
+    
+    The WhatsOpí API provides comprehensive financial and commerce services specifically designed for the Dominican Republic's informal economy. Built with cultural awareness, offline-first architecture, and optimized for Caribbean networks.
+    
+    ## Features
+    - **Dominican Spanish & Haitian Creole Support**: Native language processing
+    - **WhatsApp Integration**: Primary communication channel
+    - **Voice Interface**: Caribbean accent-optimized speech recognition
+    - **Local Payments**: tPago, PayPal, cards, and cash-in/cash-out via colmados
+    - **Offline-First**: PWA capabilities with background sync
+    - **Cultural Intelligence**: AI that understands Dominican context
+    
+  version: 1.0.0
+  contact:
+    name: WhatsOpí API Support
+    email: api-support@whatsopi.do
+    url: https://docs.whatsopi.do
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://terms.whatsopi.do
+
+servers:
+  - url: https://api.whatsopi.do
+    description: Production server
+  - url: https://staging-api.whatsopi.do
+    description: Staging server
+  - url: https://sandbox-api.whatsopi.do
+    description: Sandbox server for testing
+
+paths:
+  # Authentication Endpoints
+  /api/v1/auth/send-otp:
+    post:
+      tags:
+        - Authentication
+      summary: Send OTP for authentication
+      description: |
+        Send One-Time Password via WhatsApp or SMS for user authentication.
+        Optimized for Dominican phone numbers (809/829/849 area codes).
+      operationId: sendOTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendOTPRequest'
+            examples:
+              whatsapp:
+                summary: WhatsApp OTP (recommended)
+                value:
+                  phoneNumber: "+18091234567"
+                  method: "whatsapp"
+                  language: "es-DO"
+              sms:
+                summary: SMS fallback
+                value:
+                  phoneNumber: "8291234567"
+                  method: "sms"
+                  language: "es-DO"
+      responses:
+        '200':
+          description: OTP sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendOTPResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new user
+      description: |
+        Register a new user with Dominican-specific validation including:
+        - Dominican phone number format
+        - Optional Cédula (Dominican ID) validation
+        - Cultural location information
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Login user
+      description: Authenticate existing user with OTP verification
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/MFARequired'
+
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      description: Refresh JWT access token using refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  description: Valid refresh token
+                  example: "rt_abc123xyz789"
+              required:
+                - refreshToken
+      responses:
+        '200':
+          description: Tokens refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Logout user
+      description: Logout user and invalidate tokens
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                allDevices:
+                  type: boolean
+                  description: Logout from all devices
+                  default: false
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user profile
+      description: Retrieve current authenticated user information
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # Payment Endpoints
+  /api/v1/payments/process:
+    post:
+      tags:
+        - Payments
+      summary: Process payment
+      description: |
+        Process payments with Dominican payment methods including:
+        - tPago (Dominican mobile money)
+        - PayPal (international)
+        - Credit/debit cards
+        - Cash via colmado network
+      operationId: processPayment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '200':
+          description: Payment processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/PaymentFailed'
+
+  /api/v1/payments/history:
+    get:
+      tags:
+        - Payments
+      summary: Get payment history
+      description: Retrieve user's payment transaction history
+      operationId: getPaymentHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed, cancelled]
+      responses:
+        '200':
+          description: Payment history retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          transactions:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Transaction'
+                      meta:
+                        $ref: '#/components/schemas/PaginationMeta'
+
+  # Product Endpoints
+  /api/v1/products/search:
+    get:
+      tags:
+        - Products
+      summary: Search products
+      description: |
+        Search for products in nearby colmados with Dominican Spanish support.
+        Supports natural language queries in Spanish and location-based filtering.
+      operationId: searchProducts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query in Spanish (e.g., "arroz diana", "pollo barato")
+          schema:
+            type: string
+            example: "arroz diana"
+        - name: location[lat]
+          in: query
+          description: Latitude for location-based search
+          schema:
+            type: number
+            format: float
+            example: 18.4655
+        - name: location[lng]
+          in: query
+          description: Longitude for location-based search
+          schema:
+            type: number
+            format: float
+            example: -69.9312
+        - name: radius
+          in: query
+          description: Search radius in kilometers
+          schema:
+            type: number
+            format: float
+            minimum: 0.1
+            maximum: 50
+            default: 5
+        - name: category
+          in: query
+          description: Product category filter
+          schema:
+            type: string
+            enum: [alimentos, bebidas, higiene, limpieza, medicinas, otros]
+        - name: minPrice
+          in: query
+          description: Minimum price in DOP
+          schema:
+            type: number
+            format: float
+            minimum: 0
+        - name: maxPrice
+          in: query
+          description: Maximum price in DOP
+          schema:
+            type: number
+            format: float
+        - name: sortBy
+          in: query
+          description: Sort results by
+          schema:
+            type: string
+            enum: [price, distance, availability, rating]
+            default: distance
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Products found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          products:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Product'
+                      meta:
+                        $ref: '#/components/schemas/PaginationMeta'
+
+  # AI Service Endpoints
+  /api/v1/ai/voice/process:
+    post:
+      tags:
+        - AI Services
+      summary: Process voice command
+      description: |
+        Process voice commands in Dominican Spanish or Haitian Creole.
+        Optimized for Caribbean accents and local expressions.
+      operationId: processVoiceCommand
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: Audio file (WAV, MP3, OGG)
+                language:
+                  type: string
+                  enum: [es-DO, ht, en]
+                  default: es-DO
+                  description: Expected audio language
+                context:
+                  type: string
+                  enum: [commerce, support, general]
+                  default: general
+                  description: Context for better processing
+              required:
+                - audio
+      responses:
+        '200':
+          description: Voice command processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceProcessingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          description: Audio processing failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/ai/chat:
+    post:
+      tags:
+        - AI Services
+      summary: Chat with AI assistant
+      description: |
+        Interact with culturally-aware AI assistant that understands:
+        - Dominican Spanish expressions and slang
+        - Haitian Creole language
+        - Local business practices
+        - Cultural context and relationships
+      operationId: chatWithAI
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: AI response generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # WhatsApp Integration
+  /api/v1/whatsapp/send:
+    post:
+      tags:
+        - WhatsApp
+      summary: Send WhatsApp message
+      description: Send messages via WhatsApp Business API
+      operationId: sendWhatsAppMessage
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppMessageRequest'
+      responses:
+        '200':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhatsAppMessageResponse'
+
+  # Health Check
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: API health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+                    example: "1.0.0"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from authentication endpoints
+
+  schemas:
+    # Request Schemas
+    SendOTPRequest:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          pattern: '^(\+1)?(809|829|849)[0-9]{7}$'
+          description: Dominican phone number
+          example: "+18091234567"
+        method:
+          type: string
+          enum: [whatsapp, sms]
+          default: whatsapp
+          description: OTP delivery method
+        language:
+          type: string
+          enum: [es-DO, ht, en]
+          default: es-DO
+          description: Language for OTP message
+      required:
+        - phoneNumber
+
+    RegisterRequest:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          pattern: '^(\+1)?(809|829|849)[0-9]{7}$'
+          example: "+18091234567"
+        otp:
+          type: string
+          pattern: '^[0-9]{6}$'
+          example: "123456"
+        firstName:
+          type: string
+          maxLength: 50
+          example: "María"
+        lastName:
+          type: string
+          maxLength: 50
+          example: "González"
+        email:
+          type: string
+          format: email
+          example: "maria@example.com"
+        cedula:
+          type: string
+          pattern: '^[0-9]{3}-[0-9]{7}-[0-9]{1}$'
+          description: Dominican ID number
+          example: "001-1234567-8"
+        role:
+          type: string
+          enum: [customer, colmado_owner]
+          default: customer
+        preferredLanguage:
+          type: string
+          enum: [es-DO, ht, en]
+          default: es-DO
+        location:
+          $ref: '#/components/schemas/LocationInfo'
+      required:
+        - phoneNumber
+        - otp
+        - firstName
+        - lastName
+
+    LoginRequest:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          pattern: '^(\+1)?(809|829|849)[0-9]{7}$'
+          example: "+18091234567"
+        otp:
+          type: string
+          pattern: '^[0-9]{6}$'
+          example: "123456"
+        deviceFingerprint:
+          type: string
+          description: Device fingerprint for enhanced security
+          example: "fp_device123"
+      required:
+        - phoneNumber
+        - otp
+
+    PaymentRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+          format: float
+          minimum: 1
+          maximum: 500000
+          example: 1500.00
+        currency:
+          type: string
+          enum: [DOP, USD]
+          default: DOP
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        recipient:
+          $ref: '#/components/schemas/PaymentRecipient'
+        description:
+          type: string
+          maxLength: 200
+          example: "Pago por pollo - Colmado La Esquina"
+        metadata:
+          type: object
+          additionalProperties: true
+      required:
+        - amount
+        - paymentMethod
+        - recipient
+
+    ChatRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          maxLength: 1000
+          example: "¿Cuánto cuesta enviar dinero a Haití?"
+        language:
+          type: string
+          enum: [es-DO, ht, en]
+          default: es-DO
+        context:
+          type: object
+          properties:
+            conversationId:
+              type: string
+              example: "conv_123"
+            userLocation:
+              $ref: '#/components/schemas/LocationInfo'
+            businessContext:
+              type: string
+              enum: [commerce, payments, support, general]
+      required:
+        - message
+
+    WhatsAppMessageRequest:
+      type: object
+      properties:
+        to:
+          type: string
+          pattern: '^(\+1)?(809|829|849)[0-9]{7}$'
+          example: "+18091234567"
+        type:
+          type: string
+          enum: [template, text, interactive]
+        template:
+          type: object
+          description: WhatsApp template message
+        text:
+          type: string
+          description: Plain text message
+        interactive:
+          type: object
+          description: Interactive message with buttons/lists
+      required:
+        - to
+        - type
+
+    # Response Schemas
+    SendOTPResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                otpSent:
+                  type: boolean
+                  example: true
+                method:
+                  type: string
+                  example: "whatsapp"
+                expiresIn:
+                  type: integer
+                  example: 600
+                message:
+                  type: string
+                  example: "Código enviado via WhatsApp"
+
+    AuthResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                user:
+                  $ref: '#/components/schemas/User'
+                tokens:
+                  $ref: '#/components/schemas/TokenResponse'
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
+        refreshToken:
+          type: string
+          example: "rt_xyz789"
+        expiresIn:
+          type: integer
+          example: 3600
+
+    PaymentResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transactionId:
+                  type: string
+                  example: "txn_abc123"
+                status:
+                  type: string
+                  enum: [pending, processing, completed, failed]
+                  example: "completed"
+                amount:
+                  type: number
+                  format: float
+                  example: 1500.00
+                currency:
+                  type: string
+                  example: "DOP"
+                fees:
+                  type: number
+                  format: float
+                  example: 15.00
+                netAmount:
+                  type: number
+                  format: float
+                  example: 1485.00
+                paymentMethod:
+                  type: string
+                  example: "tpago"
+                processedAt:
+                  type: string
+                  format: date-time
+                confirmationCode:
+                  type: string
+                  example: "CONF123456"
+
+    VoiceProcessingResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transcription:
+                  type: string
+                  example: "Klk, busco pollo barato en colmados cercanos"
+                detectedLanguage:
+                  type: string
+                  example: "es-DO"
+                confidence:
+                  type: number
+                  format: float
+                  example: 0.95
+                intent:
+                  type: object
+                  properties:
+                    action:
+                      type: string
+                      example: "search_product"
+                    entities:
+                      type: object
+                      additionalProperties: true
+                response:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                      example: "¡Klk! Te ayudo a buscar pollo barato."
+                    actionRequired:
+                      type: string
+                      example: "search_products"
+                culturalMarkers:
+                  type: array
+                  items:
+                    type: string
+                  example: ["klk", "informal_greeting"]
+                processingTime:
+                  type: number
+                  format: float
+                  example: 1.2
+
+    ChatResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                response:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                      example: "Para enviar dinero a Haití, las tarifas varían según el monto..."
+                    language:
+                      type: string
+                      example: "es-DO"
+                    sentiment:
+                      type: string
+                      example: "helpful"
+                    culturalContext:
+                      type: string
+                      example: "dominican_haitian_relations"
+                suggestions:
+                  type: array
+                  items:
+                    type: string
+                  example: ["Buscar colmados cercanos", "Ver tarifas detalladas"]
+                conversationId:
+                  type: string
+                  example: "conv_123"
+                processingTime:
+                  type: number
+                  format: float
+                  example: 0.8
+
+    WhatsAppMessageResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                messageId:
+                  type: string
+                  example: "wamid.abc123"
+                status:
+                  type: string
+                  example: "sent"
+                to:
+                  type: string
+                  example: "+18091234567"
+
+    # Entity Schemas
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "usr_abc123"
+        phoneNumber:
+          type: string
+          example: "+18091234567"
+        firstName:
+          type: string
+          example: "María"
+        lastName:
+          type: string
+          example: "González"
+        email:
+          type: string
+          format: email
+          example: "maria@example.com"
+        cedula:
+          type: string
+          example: "001-1234567-8"
+        role:
+          type: string
+          enum: [customer, colmado_owner, agent, admin]
+          example: "customer"
+        kycLevel:
+          type: integer
+          minimum: 0
+          maximum: 3
+          example: 1
+        preferredLanguage:
+          type: string
+          enum: [es-DO, ht, en]
+          example: "es-DO"
+        location:
+          $ref: '#/components/schemas/LocationInfo'
+        limits:
+          type: object
+          properties:
+            daily:
+              type: number
+              format: float
+              example: 25000.00
+            monthly:
+              type: number
+              format: float
+              example: 100000.00
+            transaction:
+              type: number
+              format: float
+              example: 10000.00
+        reputation:
+          type: object
+          properties:
+            score:
+              type: number
+              format: float
+              example: 4.8
+            totalTransactions:
+              type: integer
+              example: 156
+            successRate:
+              type: number
+              format: float
+              example: 0.99
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "txn_abc123"
+        type:
+          type: string
+          enum: [payment, transfer, withdrawal, deposit]
+          example: "payment"
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, cancelled]
+          example: "completed"
+        amount:
+          type: number
+          format: float
+          example: 1500.00
+        currency:
+          type: string
+          example: "DOP"
+        fees:
+          type: number
+          format: float
+          example: 15.00
+        netAmount:
+          type: number
+          format: float
+          example: 1485.00
+        sender:
+          $ref: '#/components/schemas/TransactionParty'
+        recipient:
+          $ref: '#/components/schemas/TransactionParty'
+        paymentMethod:
+          type: object
+          properties:
+            type:
+              type: string
+              example: "tpago"
+            lastFourDigits:
+              type: string
+              example: "4567"
+            provider:
+              type: string
+              example: "Banco Popular"
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "prod_abc123"
+        name:
+          type: string
+          example: "Arroz Diana 5 libras"
+        description:
+          type: string
+          example: "Arroz blanco de calidad premium"
+        category:
+          type: string
+          example: "alimentos"
+        price:
+          type: number
+          format: float
+          example: 285.00
+        currency:
+          type: string
+          example: "DOP"
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+        colmado:
+          $ref: '#/components/schemas/Colmado'
+        availability:
+          type: object
+          properties:
+            inStock:
+              type: boolean
+              example: true
+            quantity:
+              type: integer
+              example: 15
+            lastUpdated:
+              type: string
+              format: date-time
+
+    Colmado:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "col_456"
+        name:
+          type: string
+          example: "Colmado La Esquina"
+        location:
+          $ref: '#/components/schemas/LocationInfo'
+        distance:
+          type: number
+          format: float
+          description: Distance in kilometers
+          example: 0.8
+        rating:
+          type: number
+          format: float
+          example: 4.5
+        isOpen:
+          type: boolean
+          example: true
+
+    LocationInfo:
+      type: object
+      properties:
+        municipality:
+          type: string
+          example: "Santo Domingo"
+        sector:
+          type: string
+          example: "Zona Colonial"
+        address:
+          type: string
+          example: "Calle Mercedes #123"
+        coordinates:
+          type: object
+          properties:
+            lat:
+              type: number
+              format: float
+              example: 18.4655
+            lng:
+              type: number
+              format: float
+              example: -69.9312
+
+    PaymentMethod:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [tpago, paypal, card, cash]
+          example: "tpago"
+        details:
+          type: object
+          additionalProperties: true
+          example:
+            tpagoPhone: "+18099876543"
+      required:
+        - type
+
+    PaymentRecipient:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [user, colmado, external]
+          example: "user"
+        id:
+          type: string
+          example: "usr_def456"
+      required:
+        - type
+        - id
+
+    TransactionParty:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "usr_abc123"
+        phoneNumber:
+          type: string
+          example: "+18091234567"
+        name:
+          type: string
+          example: "María González"
+
+    # Common Response Schemas
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-12-01T10:00:00Z"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "El número de teléfono no es válido"
+            details:
+              type: object
+              additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-12-01T10:00:00Z"
+        requestId:
+          type: string
+          example: "req_abc123"
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 100
+        totalPages:
+          type: integer
+          example: 5
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "BAD_REQUEST"
+              message: "La solicitud contiene errores"
+            timestamp: "2024-12-01T10:00:00Z"
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "UNAUTHORIZED"
+              message: "Token de acceso inválido o expirado"
+            timestamp: "2024-12-01T10:00:00Z"
+
+    ValidationError:
+      description: Validation Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "VALIDATION_ERROR"
+              message: "El número de teléfono dominicano no es válido"
+              details:
+                field: "phoneNumber"
+                reason: "invalid_format"
+                expected: "+1809XXXXXXX or 809XXXXXXX"
+            timestamp: "2024-12-01T10:00:00Z"
+
+    RateLimited:
+      description: Rate Limited
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Total requests allowed in window
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Requests remaining in window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when window resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "RATE_LIMITED"
+              message: "Demasiadas solicitudes. Intenta de nuevo en 15 minutos."
+            timestamp: "2024-12-01T10:00:00Z"
+
+    MFARequired:
+      description: Multi-Factor Authentication Required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "MFA_REQUIRED"
+              message: "Se requiere autenticación adicional"
+              details:
+                methods: ["whatsapp_otp", "sms_otp"]
+            timestamp: "2024-12-01T10:00:00Z"
+
+    PaymentFailed:
+      description: Payment Processing Failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "PAYMENT_FAILED"
+              message: "No se pudo procesar el pago"
+              details:
+                reason: "insufficient_funds"
+                availableBalance: 500.00
+                requiredAmount: 1500.00
+            timestamp: "2024-12-01T10:00:00Z"
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Payments
+    description: Payment processing and transaction management
+  - name: Products
+    description: Product search and catalog management
+  - name: AI Services
+    description: Voice processing and AI chat capabilities
+  - name: WhatsApp
+    description: WhatsApp Business API integration
+  - name: System
+    description: System health and status endpoints

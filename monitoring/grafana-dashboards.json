@@ -1,0 +1,314 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "WhatsOpí - Dominican Republic Operations Dashboard",
+    "tags": ["whatsopi", "dominican-republic", "production"],
+    "timezone": "America/Santo_Domingo",
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Response Times (Dominican Users)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{service=\"whatsopi-api\",country=\"DO\"}[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{service=\"whatsopi-api\",country=\"DO\"}[5m]))",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "max": 5,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 3}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Dominican Spanish Voice Processing Accuracy",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "avg(voice_recognition_accuracy{language=\"es-DO\"}) * 100",
+            "legendFormat": "Dominican Spanish Accuracy"
+          },
+          {
+            "expr": "avg(voice_recognition_accuracy{language=\"ht\"}) * 100",
+            "legendFormat": "Haitian Creole Accuracy"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 85},
+                {"color": "green", "value": 95}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Payment System Health (Dominican Methods)",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "payment_success_rate{provider=\"tpago\"}",
+            "legendFormat": "tPago Success Rate"
+          },
+          {
+            "expr": "payment_success_rate{provider=\"paypal\",currency=\"DOP\"}",
+            "legendFormat": "PayPal DOP Success Rate"
+          },
+          {
+            "expr": "payment_processing_time{provider=\"dominican_banks\"}",
+            "legendFormat": "Bank Processing Time"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Cultural Appropriateness Score",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "cultural_appropriateness_score{region=\"dominican\"}",
+            "legendFormat": "Dominican Cultural Score"
+          },
+          {
+            "expr": "cultural_appropriateness_score{region=\"haitian\"}",
+            "legendFormat": "Haitian Cultural Score"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 100,
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth"
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 5,
+        "title": "WhatsApp Business API Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "whatsapp_webhook_success_rate",
+            "legendFormat": "Webhook Success Rate"
+          },
+          {
+            "expr": "whatsapp_message_delivery_rate{country=\"DO\"}",
+            "legendFormat": "Message Delivery (DO)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 0.95},
+                {"color": "green", "value": 0.99}
+              ]
+            }
+          }  
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Database Performance (PostgreSQL)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(postgres_queries_total{instance=~\".*whatsopi.*\"}[5m])",
+            "legendFormat": "Queries per second"
+          },
+          {
+            "expr": "postgres_connections{instance=~\".*whatsopi.*\"}",
+            "legendFormat": "Active connections"
+          },
+          {
+            "expr": "postgres_slow_queries{instance=~\".*whatsopi.*\"}",
+            "legendFormat": "Slow queries (>1s)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24}
+      },
+      {
+        "id": 7,
+        "title": "EKS Cluster Health",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "kube_node_status_condition{condition=\"Ready\",status=\"true\"}",
+            "legendFormat": "Ready Nodes"
+          },
+          {
+            "expr": "kube_pod_container_status_running{namespace=\"whatsopi\"}",
+            "legendFormat": "Running Pods"
+          },
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{namespace=\"whatsopi\"}[5m])",
+            "legendFormat": "CPU Usage"
+          },
+          {
+            "expr": "container_memory_usage_bytes{namespace=\"whatsopi\"} / 1024 / 1024 / 1024",
+            "legendFormat": "Memory Usage (GB)"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32}
+      },
+      {
+        "id": 8,
+        "title": "Network Performance (Caribbean Optimization)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "cloudfront_requests_per_second{distribution=~\".*whatsopi.*\"}",
+            "legendFormat": "CloudFront Requests/s"
+          },
+          {
+            "expr": "cloudfront_cache_hit_rate{distribution=~\".*whatsopi.*\"}",
+            "legendFormat": "Cache Hit Rate"
+          },
+          {
+            "expr": "avg(network_latency_seconds{source=\"miami\",destination=\"santo_domingo\"})",
+            "legendFormat": "Miami-Santo Domingo Latency"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40}
+      },
+      {
+        "id": 9,
+        "title": "Security Metrics (Law 172-13 Compliance)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "security_incidents_total{severity=\"high\"}",
+            "legendFormat": "High Severity Incidents"
+          },
+          {
+            "expr": "data_encryption_compliance_score",
+            "legendFormat": "Encryption Compliance"
+          },
+          {
+            "expr": "user_consent_compliance_rate",
+            "legendFormat": "Consent Compliance"
+          },
+          {
+            "expr": "waf_blocked_requests_total",
+            "legendFormat": "WAF Blocked Requests"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40}
+      },
+      {
+        "id": 10,
+        "title": "Business Metrics (Colmado Usage)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "active_colmados_total{country=\"DO\"}",
+            "legendFormat": "Active Colmados"
+          },
+          {
+            "expr": "daily_transactions_total{business_type=\"colmado\"}",
+            "legendFormat": "Daily Transactions"
+          },
+          {
+            "expr": "avg_order_value_dop{business_type=\"colmado\"}",
+            "legendFormat": "Average Order Value (DOP)"
+          },
+          {
+            "expr": "user_registrations_total{source=\"whatsapp\",country=\"DO\"}",
+            "legendFormat": "WhatsApp Registrations"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 48}
+      }
+    ],
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "refresh": "30s",
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "expr": "deployment_event{service=\"whatsopi\"}",
+          "enable": true,
+          "iconColor": "blue"
+        },
+        {
+          "name": "Dominican Holidays",
+          "datasource": "prometheus", 
+          "expr": "dominican_holiday{date=\"today\"}",
+          "enable": true,
+          "iconColor": "green"
+        }
+      ]
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "environment",
+          "type": "custom",
+          "options": [
+            {"text": "Production", "value": "production"},
+            {"text": "Staging", "value": "staging"}
+          ],
+          "current": {"text": "Production", "value": "production"}
+        },
+        {
+          "name": "region",
+          "type": "custom", 
+          "options": [
+            {"text": "Santo Domingo", "value": "santo_domingo"},
+            {"text": "Santiago", "value": "santiago"},
+            {"text": "Sur", "value": "sur"}
+          ],
+          "current": {"text": "All", "value": "$__all"}
+        }
+      ]
+    }
+  }
+}

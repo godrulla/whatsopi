@@ -1,0 +1,9 @@
+/* App-specific styles */
+.App {
+  text-align: center;
+}
+
+.dominican-flag-accent {
+  border-left: 4px solid #1B73E8;
+  border-right: 4px solid #DC2626;
+}

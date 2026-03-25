@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dominican flag inspired colors */
+:root {
+  --dr-blue: #1B73E8;
+  --dr-red: #DC2626;
+  --dr-white: #FFFFFF;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+    "Ubuntu", "Cantarell", "Open Sans", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* WhatsApp-style green for familiarity */
+.whatsapp-green {
+  background-color: #25d366;
+}
+
+/* Dominican cultural elements */
+.dominican-gradient {
+  background: linear-gradient(90deg, #1B73E8 0%, #FFFFFF 50%, #DC2626 100%);
+}
